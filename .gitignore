@@ -1,0 +1,45 @@
+# Python и uv
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Настройки окружения: в git попадает только образец .env.example
+.env
+.env.local
+*.env.local
+
+# Секреты
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+
+# Редакторы и IDE
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+*.code-workspace
+
+# Логи и временные файлы
+logs/
+*.log
+*.tmp
+*.bak
+*~
+
+# Файлы операционных систем
+.DS_Store
+Thumbs.db
+
+# Локальные настройки Claude Code
+.claude/*
+!.claude/agents/
