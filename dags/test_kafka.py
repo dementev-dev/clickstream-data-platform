@@ -9,6 +9,8 @@ import uuid
 from airflow.sdk import dag, get_current_context, task
 
 BROKER = "kafka:9092"
+# Топик пробника постоянный, и стенд опирается на автосоздание: срок хранения
+# чистит записи, а не топик. В бою автосоздание обычно выключают.
 TOPIC = "airflow_integration_probe"
 
 
@@ -32,8 +34,6 @@ def test_kafka():
         consumer = None
 
         try:
-            # Стенд опирается на автосоздание: срок хранения чистит записи, а
-            # не топик; в бою автосоздание обычно выключают.
             delivery_errors: list[str] = []
             delivered_offsets: list[tuple[int, int]] = []
 

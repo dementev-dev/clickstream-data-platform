@@ -10,14 +10,42 @@ from airflow.sdk import Connection, dag, get_current_context, task
 CLUSTER = "clickstream_cluster"
 LOCAL_TABLE = "airflow_probe_local"
 DISTRIBUTED_TABLE = "airflow_probe_distributed"
+EXPECTED_TABLES = [
+    (DISTRIBUTED_TABLE, "Distributed"),
+    (LOCAL_TABLE, "ReplicatedMergeTree"),
+]
+
+# Ноду 2 пробник читает не своим подключением, а запросом remote() с ноды 1: у
+# Airflow подготовлено одно подключение — к clickhouse-01, и второго ради
+# пробника не заводят. При этом remote('clickhouse-02:9000', ...) делает
+# инициатором распределённого запроса саму ноду 2 — проверяется именно это, а
+# не доступность ноды 2 по сети. Порт 9000 — межсерверный, тогда как
+# подключение Airflow ходит по HTTP на 8123.
+NODES = (
+    ("ноде 1", "system.tables"),
+    ("ноде 2", "remote('clickhouse-02:9000', system.tables)"),
+)
 
 
-def _table_engines(client, *, query_node_2: bool) -> list[tuple[str, str]]:
-    source = (
-        "remote('clickhouse-02:9000', system.tables)"
-        if query_node_2
-        else "system.tables"
+def _clickhouse_client():
+    # clickhouse_connect стоит только в образе Airflow, а малые проверки грузят
+    # этот модуль обычным интерпретатором, где пакета нет. Импорт верхнего
+    # уровня красит make config-test, поэтому он живёт здесь.
+    import clickhouse_connect
+
+    connection = Connection.get("clickhouse_default")
+    return clickhouse_connect.get_client(
+        host=connection.host,
+        port=connection.port,
+        username=connection.login or "default",
+        password=connection.password or "",
+        database=connection.schema or "default",
+        connect_timeout=5,
+        send_receive_timeout=30,
     )
+
+
+def _table_engines(client, source: str) -> list[tuple[str, str]]:
     result = client.query(
         f"""
         SELECT name, engine
@@ -41,56 +69,38 @@ def _drop_tables(client) -> None:
 
 
 def _assert_tables_absent(client) -> None:
-    for query_node_2, node_name in ((False, "ноде 1"), (True, "ноде 2")):
-        remaining = _table_engines(client, query_node_2=query_node_2)
+    for node_name, source in NODES:
+        remaining = _table_engines(client, source)
         if remaining:
             raise RuntimeError(
                 f"служебные таблицы остались на {node_name}: {remaining}"
             )
 
 
+def _assert_tables_created(client) -> None:
+    for node_name, source in NODES:
+        actual_tables = _table_engines(client, source)
+        if actual_tables != EXPECTED_TABLES:
+            raise RuntimeError(
+                f"неверный набор таблиц на {node_name}: {actual_tables}"
+            )
+
+
 def _assert_marker_path(
     *,
-    local_rows: list[tuple[str, str]],
     distributed_rows: list[tuple[int, str, str]],
+    write_hostname: str,
     node_2_hostname: str,
     marker: str,
 ) -> None:
-    if len(local_rows) != 1 or local_rows[0][1] != marker:
-        raise RuntimeError(f"маркер не найден в локальной таблице: {marker}")
-    node_1_hostname = local_rows[0][0]
-    if node_1_hostname == node_2_hostname:
+    if write_hostname == node_2_hostname:
         raise RuntimeError("запись и чтение маркера должны выполняться с разных нод")
-    expected_rows = [(1, node_1_hostname, marker)]
+    expected_rows = [(1, write_hostname, marker)]
     if distributed_rows != expected_rows:
         raise RuntimeError(
             "нода 2 не прочитала маркер первого шарда через Distributed: "
             f"{marker}, получено {distributed_rows}"
         )
-
-
-def _cleanup_clickhouse_client(client, original_error: BaseException | None) -> None:
-    cleanup_errors: list[Exception] = []
-    try:
-        _drop_tables(client)
-        _assert_tables_absent(client)
-    except Exception as error:
-        cleanup_errors.append(error)
-    try:
-        client.close()
-    except Exception as error:
-        cleanup_errors.append(error)
-
-    if original_error is not None:
-        for error in cleanup_errors:
-            original_error.add_note(
-                f"Дополнительная ошибка очистки ClickHouse: {error}"
-            )
-        return
-    if len(cleanup_errors) == 1:
-        raise cleanup_errors[0]
-    if cleanup_errors:
-        raise ExceptionGroup("ошибки очистки ClickHouse", cleanup_errors)
 
 
 @dag(
@@ -103,26 +113,8 @@ def _cleanup_clickhouse_client(client, original_error: BaseException | None) -> 
 )
 def test_clickhouse():
     @task
-    def check_cluster_path() -> None:
-        import clickhouse_connect
-
-        connection = Connection.get("clickhouse_default")
-        client = clickhouse_connect.get_client(
-            host=connection.host,
-            port=connection.port,
-            username=connection.login or "default",
-            password=connection.password or "",
-            database=connection.schema or "default",
-            connect_timeout=5,
-            send_receive_timeout=30,
-        )
-        marker = f"{get_current_context()['run_id']}:{uuid.uuid4()}"
-        expected_tables = [
-            (DISTRIBUTED_TABLE, "Distributed"),
-            (LOCAL_TABLE, "ReplicatedMergeTree"),
-        ]
-        probe_error = None
-
+    def prepare_tables() -> None:
+        client = _clickhouse_client()
         try:
             _drop_tables(client)
             _assert_tables_absent(client)
@@ -151,17 +143,15 @@ def test_clickhouse():
                 )
                 """
             )
+            _assert_tables_created(client)
+        finally:
+            client.close()
 
-            for query_node_2, node_name in ((False, "ноде 1"), (True, "ноде 2")):
-                actual_tables = _table_engines(
-                    client,
-                    query_node_2=query_node_2,
-                )
-                if actual_tables != expected_tables:
-                    raise RuntimeError(
-                        f"неверный набор таблиц на {node_name}: {actual_tables}"
-                    )
-
+    @task
+    def write_marker() -> dict[str, str]:
+        client = _clickhouse_client()
+        try:
+            marker = f"{get_current_context()['run_id']}:{uuid.uuid4()}"
             client.insert(
                 f"default.{LOCAL_TABLE}",
                 [[marker]],
@@ -175,6 +165,16 @@ def test_clickhouse():
                 """,
                 parameters={"marker": marker},
             ).result_rows
+            if len(local_rows) != 1 or local_rows[0][1] != marker:
+                raise RuntimeError(f"маркер не найден в локальной таблице: {marker}")
+            return {"marker": marker, "hostname": local_rows[0][0]}
+        finally:
+            client.close()
+
+    @task
+    def read_from_node_2(written: dict[str, str]) -> None:
+        client = _clickhouse_client()
+        try:
             node_2_rows = client.query(
                 """
                 SELECT hostName()
@@ -195,21 +195,36 @@ def test_clickhouse():
                 )
                 WHERE marker = {{marker:String}}
                 """,
-                parameters={"marker": marker},
+                parameters={"marker": written["marker"]},
             ).result_rows
             _assert_marker_path(
-                local_rows=local_rows,
                 distributed_rows=distributed_rows,
+                write_hostname=written["hostname"],
                 node_2_hostname=node_2_rows[0][0],
-                marker=marker,
+                marker=written["marker"],
             )
-        except BaseException as error:
-            probe_error = error
-            raise
         finally:
-            _cleanup_clickhouse_client(client, probe_error)
+            client.close()
 
-    check_cluster_path()
+    # Уборка идёт только после успеха: упавший пробник оставляет кластер таким,
+    # каким сломался, а остатки сносит начало следующего запуска. Правило
+    # запуска решает здесь и то, что стенд увидит снаружи — с "all_done"
+    # уборка стала бы зелёным концом графа и покрасила бы в зелёный запуск
+    # с упавшей проверкой (ADR 0003).
+    @task
+    def cleanup_tables() -> None:
+        client = _clickhouse_client()
+        try:
+            _drop_tables(client)
+            _assert_tables_absent(client)
+        finally:
+            client.close()
+
+    prepared = prepare_tables()
+    written = write_marker()
+    checked = read_from_node_2(written)
+
+    prepared >> written >> checked >> cleanup_tables()
 
 
 test_clickhouse()
