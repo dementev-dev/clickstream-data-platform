@@ -15,6 +15,16 @@ grep -Fxq -- '- нода 2 — `http://127.0.0.1:28124`, нативный пор
 printf 'ЗЕЛЁНО: список портов остаётся единым списком.\n'
 
 awk '
+    previous == "`make config-test` проверяет Compose, синтаксис Bash и Python, малые проверки" &&
+        $0 == "логики пробников и пробельные ошибки в diff без запуска стенда." {
+        found = 1
+    }
+    {previous = $0}
+    END {exit !found}
+' "$README"
+printf 'ЗЕЛЁНО: README перечисляет малые проверки пробников в составе config-test.\n'
+
+awk '
     previous == "После изменения `infra/clickhouse/config.d/prometheus.xml` выполните" &&
         $0 == "`docker compose restart clickhouse-01 clickhouse-02`: обычный `make up` не" {
         found = 1
@@ -35,4 +45,4 @@ elif [[ "$grep_status" -ne 1 ]]; then
 fi
 printf 'ЗЕЛЁНО: отчёт проверки использует русское обозначение ГБ.\n'
 
-printf 'ИТОГ: пройдено 5, ошибок 0\n'
+printf 'ИТОГ: пройдено 6, ошибок 0\n'

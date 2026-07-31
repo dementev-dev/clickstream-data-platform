@@ -24,7 +24,11 @@ x-clickhouse-common: &clickhouse-common
     start_period: 10s
 
 x-airflow-common: &airflow-common
-  image: ${AIRFLOW_IMAGE:-apache/airflow:3.3.0}
+  image: clickstream-airflow:local
+  build:
+    context: ./infra/airflow
+    args:
+      AIRFLOW_BASE_IMAGE: ${AIRFLOW_IMAGE:-apache/airflow:3.3.0}
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__PARALLELISM: "4"
