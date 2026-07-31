@@ -19,6 +19,15 @@ jq -e '
     .services.superset.image == "clickstream-superset:local" and
     (.services.superset.build.args.SUPERSET_BASE_IMAGE | length > 0)
 ' >/dev/null <<<"$config_json"
+grep -qx 'ARG AIRFLOW_BASE_IMAGE' "$ROOT_DIR/infra/airflow/Dockerfile"
+jq -e '
+    .services["airflow-init"].image == "clickstream-airflow:local" and
+    (.services["airflow-init"].build.args.AIRFLOW_BASE_IMAGE | length > 0) and
+    all(
+        .services[];
+        ((.environment // {}) | has("_PIP_ADDITIONAL_REQUIREMENTS") | not)
+    )
+' >/dev/null <<<"$config_json"
 jq -e '
     .services["airflow-init"] as $service |
     ($service.environment.AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE ==
@@ -39,6 +48,20 @@ if [[ "${#shell_files[@]}" -eq 0 ]]; then
 fi
 bash -n "${shell_files[@]}"
 PYTHONPYCACHEPREFIX="$CACHE_DIR" uv run --no-project python -m compileall -q "$ROOT_DIR/dags"
+unit_status=0
+unit_output="$(
+    PYTHONPYCACHEPREFIX="$CACHE_DIR" \
+        uv run --no-project python "$ROOT_DIR/tests/dag-probes-unit.py" 2>&1
+)" || unit_status=$?
+printf '%s\n' "$unit_output"
+if [[ "$unit_status" -ne 0 ]]; then
+    exit "$unit_status"
+fi
+if grep -Eq '^(Ran [0-9]+ tests|OK|FAILED)' <<<"$unit_output" ||
+    ! grep -Eq '^ИТОГ: пройдено [0-9]+, ошибок 0$' <<<"$unit_output"; then
+    printf 'ОШИБКА: малые проверки пробников вывели итог не на русском языке.\n' >&2
+    exit 1
+fi
 git -C "$ROOT_DIR" diff --check
 
 printf 'ЗЕЛЁНО: Compose, Bash, Python и пробельные ошибки diff проверены.\n'

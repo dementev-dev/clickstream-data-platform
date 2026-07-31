@@ -17,6 +17,7 @@ kafka_cleanup_image=''
 kafka_cleanup_port=''
 kafka_cleanup_topic=''
 airflow_cleanup_port=''
+airflow_cleanup_dag_id=''
 airflow_cleanup_original_paused=''
 airflow_cleanup_run_id=''
 airflow_cleanup_token=''
@@ -232,7 +233,7 @@ cleanup_airflow_run() {
     encoded_run_id="$(jq -rn --arg value "$airflow_cleanup_run_id" '$value | @uri')"
     if curl -sf --max-time 10 -X DELETE \
         -H "Authorization: Bearer ${airflow_cleanup_token}" \
-        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/example_clickstream_hello/dagRuns/${encoded_run_id}" \
+        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${airflow_cleanup_dag_id}/dagRuns/${encoded_run_id}" \
         >/dev/null 2>&1; then
         airflow_cleanup_run_id=''
         return 0
@@ -250,7 +251,7 @@ cleanup_airflow_pause() {
         -H "Authorization: Bearer ${airflow_cleanup_token}" \
         -H 'Content-Type: application/json' \
         -d "$payload" \
-        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/example_clickstream_hello" \
+        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${airflow_cleanup_dag_id}" \
         >/dev/null 2>&1; then
         airflow_cleanup_original_paused=''
         return 0
@@ -383,18 +384,84 @@ check_grafana_datasource() {
     fi
 }
 
+run_airflow_probe() {
+    local dag
+    local dag_id="$1"
+    local encoded_run_id
+    local response
+    local run_state=''
+    local unpaused
+    local -i attempt
+
+    dag="$(curl -sf --max-time 10 \
+        -H "Authorization: Bearer ${airflow_cleanup_token}" \
+        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${dag_id}" \
+        2>/dev/null || true)"
+    if ! jq -e --arg dag_id "$dag_id" '.dag_id == $dag_id' \
+        >/dev/null 2>&1 <<<"$dag"; then
+        fail "пробник ${dag_id} не виден через API Airflow"
+        return 1
+    fi
+
+    airflow_cleanup_dag_id="$dag_id"
+    airflow_cleanup_original_paused="$(jq -r '.is_paused | tostring' <<<"$dag")"
+    unpaused="$(curl -sf --max-time 10 -X PATCH \
+        -H "Authorization: Bearer ${airflow_cleanup_token}" \
+        -H 'Content-Type: application/json' \
+        -d '{"is_paused":false}' \
+        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${dag_id}" \
+        2>/dev/null || true)"
+    if ! jq -e '.is_paused == false' >/dev/null 2>&1 <<<"$unpaused"; then
+        fail "Airflow не смог включить пробник ${dag_id} перед ручным запуском"
+        cleanup_airflow_pause || true
+        return 1
+    fi
+
+    response="$(curl -sf --max-time 10 -X POST \
+        -H "Authorization: Bearer ${airflow_cleanup_token}" \
+        -H 'Content-Type: application/json' \
+        -d '{"logical_date":null}' \
+        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${dag_id}/dagRuns" \
+        2>/dev/null || true)"
+    airflow_cleanup_run_id="$(jq -r '.dag_run_id // empty' <<<"$response")"
+    if [[ -z "$airflow_cleanup_run_id" ]]; then
+        fail "Airflow не создал ручной запуск пробника ${dag_id}"
+        cleanup_airflow_pause || true
+        return 1
+    fi
+
+    encoded_run_id="$(jq -rn --arg value "$airflow_cleanup_run_id" '$value | @uri')"
+    for ((attempt = 1; attempt <= 60; attempt++)); do
+        response="$(curl -sf --max-time 10 \
+            -H "Authorization: Bearer ${airflow_cleanup_token}" \
+            "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${dag_id}/dagRuns/${encoded_run_id}" \
+            2>/dev/null || true)"
+        run_state="$(jq -r '.state // empty' <<<"$response")"
+        [[ "$run_state" == 'success' || "$run_state" == 'failed' ]] && break
+        sleep 2
+    done
+
+    if [[ "$run_state" == 'success' ]] && \
+        cleanup_airflow_run && cleanup_airflow_pause; then
+        pass "пробник ${dag_id} завершился успешно, запуск удалён, исходная пауза восстановлена"
+        return 0
+    fi
+
+    fail "пробник ${dag_id} не завершился чисто: состояние ${run_state:-неизвестно}"
+    cleanup_airflow_run || true
+    cleanup_airflow_pause || true
+    return 1
+}
+
 check_airflow() {
     local config
     local connection
     local dag
-    local encoded_run_id
+    local dag_id
     local health
     local password
     local response
-    local run_state=''
-    local unpaused
     local user
-    local -i attempt
 
     config="$(compose config --format json 2>/dev/null || true)"
     user="$(jq -r '.services["airflow-apiserver"].environment.AIRFLOW_ADMIN_USER // empty' <<<"$config")"
@@ -419,29 +486,22 @@ check_airflow() {
             '{username: $username, password: $password}')" \
         "http://127.0.0.1:${airflow_cleanup_port}/auth/token" 2>/dev/null || true)"
     airflow_cleanup_token="$(jq -r '.access_token // empty' <<<"$response")"
-    dag="$(curl -sf --max-time 10 \
-        -H "Authorization: Bearer ${airflow_cleanup_token}" \
-        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/example_clickstream_hello" \
-        2>/dev/null || true)"
-    if [[ -n "$airflow_cleanup_token" ]] && \
-        jq -e '.dag_id == "example_clickstream_hello"' >/dev/null 2>&1 <<<"$dag"; then
-        airflow_cleanup_original_paused="$(jq -r '.is_paused | tostring' <<<"$dag")"
-        pass 'учётные данные администратора Airflow принимаются, пример DAG виден через API'
-    else
-        fail 'Airflow не принял учётные данные администратора или не показал пример DAG'
+    if [[ -z "$airflow_cleanup_token" ]]; then
+        fail 'Airflow не принял учётные данные администратора'
         return
     fi
-
-    unpaused="$(curl -sf --max-time 10 -X PATCH \
-        -H "Authorization: Bearer ${airflow_cleanup_token}" \
-        -H 'Content-Type: application/json' \
-        -d '{"is_paused":false}' \
-        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/example_clickstream_hello" \
-        2>/dev/null || true)"
-    if ! jq -e '.is_paused == false' >/dev/null 2>&1 <<<"$unpaused"; then
-        fail 'Airflow не смог включить пример DAG перед ручным запуском'
-        return
-    fi
+    for dag_id in test_clickhouse test_kafka; do
+        dag="$(curl -sf --max-time 10 \
+            -H "Authorization: Bearer ${airflow_cleanup_token}" \
+            "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/${dag_id}" \
+            2>/dev/null || true)"
+        if ! jq -e --arg dag_id "$dag_id" '.dag_id == $dag_id' \
+            >/dev/null 2>&1 <<<"$dag"; then
+            fail "Airflow не показал пробник ${dag_id}"
+            return
+        fi
+    done
+    pass 'учётные данные администратора Airflow принимаются, оба пробника видны через API'
 
     connection="$(curl -sf --max-time 10 \
         -H "Authorization: Bearer ${airflow_cleanup_token}" \
@@ -463,34 +523,8 @@ check_airflow() {
         fail 'подключение Airflow не указывает на clickhouse-01 или нода недоступна из контейнера'
     fi
 
-    response="$(curl -sf --max-time 10 -X POST \
-        -H "Authorization: Bearer ${airflow_cleanup_token}" \
-        -H 'Content-Type: application/json' \
-        -d '{"logical_date":null}' \
-        "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/example_clickstream_hello/dagRuns" \
-        2>/dev/null || true)"
-    airflow_cleanup_run_id="$(jq -r '.dag_run_id // empty' <<<"$response")"
-    if [[ -z "$airflow_cleanup_run_id" ]]; then
-        fail 'Airflow не создал ручной запуск примера DAG'
-        return
-    fi
-
-    encoded_run_id="$(jq -rn --arg value "$airflow_cleanup_run_id" '$value | @uri')"
-    for ((attempt = 1; attempt <= 60; attempt++)); do
-        response="$(curl -sf --max-time 10 \
-            -H "Authorization: Bearer ${airflow_cleanup_token}" \
-            "http://127.0.0.1:${airflow_cleanup_port}/api/v2/dags/example_clickstream_hello/dagRuns/${encoded_run_id}" \
-            2>/dev/null || true)"
-        run_state="$(jq -r '.state // empty' <<<"$response")"
-        [[ "$run_state" == 'success' || "$run_state" == 'failed' ]] && break
-        sleep 2
-    done
-
-    if [[ "$run_state" == 'success' ]] && cleanup_airflow_run && cleanup_airflow_pause; then
-        pass 'ручной запуск примера DAG завершился успешно, удалён, исходная пауза восстановлена'
-    else
-        fail "ручной запуск примера DAG не завершился чисто: состояние ${run_state:-неизвестно}"
-    fi
+    run_airflow_probe test_clickhouse || true
+    run_airflow_probe test_kafka || true
 }
 
 check_superset() {
