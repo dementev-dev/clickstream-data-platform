@@ -48,8 +48,7 @@ Airflow) и названия из кода. Если для понятия ес�
 
 Трекер — Gitea на `git.dementev.space`, работа через CLI `tea` (логин по
 умолчанию настроен, репозиторий определяется по git remote). Команды и
-подводные камни описаны в
-[доке предшественника](https://git.dementev.space/ddmitry/clickstream-ch-kafka-superset-demo/src/branch/main/docs/agents/issue-tracker.md).
+подводные камни — в [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
 
 - Спека фичи — файл в `docs/specs/`, источник истины, версионируется с кодом.
 - Корневой issue фичи — тонкий: ссылка на спеку и чек-лист дочерних issues
@@ -60,8 +59,33 @@ Airflow) и названия из кода. Если для понятия ес�
 - Метки триажа — пять ролей: `needs-triage`, `needs-info`, `ready-for-agent`,
   `ready-for-human`, `wontfix`. Карта и её тикеты — метки `wayfinder:*`.
 
+## Agent skills
+
+### Issue tracker
+
+Задачи — в Gitea на `git.dementev.space`, все операции через CLI `tea`.
+См. [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Пять канонических меток триажа без переименований, уже заведены в трекере.
+См. [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Один контекст: `CONTEXT.md` в корне и `docs/adr/`.
+См. [`docs/agents/domain.md`](docs/agents/domain.md).
+
 ## Структура
 
 - Новые документы — в `docs/` или в профильных подпапках, не в корне.
 - Состав доков v2 определяется по ходу этапов, набор предшественника не
   копируется (спека, раздел 12).
+- Имена файлов в `docs/specs/` и `docs/research/` — `ГГГГ-ММ-ДД-краткое-имя.md`:
+  дата создания документа и слаг строчными латинскими буквами через дефис
+  (`2026-07-30-stand-v2-realism.md`). Дата фиксирует, когда документ появился,
+  и при правках не меняется: файлы сортируются по времени, а история живёт
+  в git.
+- Имена файлов в `docs/adr/` — `NNNN-краткое-имя.md`: сквозной номер из четырёх
+  цифр и слаг (`0001-stand-services.md`). Решения нумеруются подряд, дата
+  в имени не нужна.
