@@ -1,4 +1,4 @@
-"""Малые проверки логики пробника ClickHouse без запуска Airflow."""
+"""Малые проверки логики пробников ClickHouse и Kafka без запуска Airflow."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def load_clickhouse_dag_tasks():
     return module, captured_tasks
 
 
-def load_kafka_dag_task():
+def load_kafka_dag_tasks():
     airflow_module = types.ModuleType("airflow")
     sdk_module = types.ModuleType("airflow.sdk")
     captured_tasks = {}
@@ -87,7 +87,7 @@ def load_kafka_dag_task():
         raise RuntimeError("не удалось загрузить модуль пробника Kafka")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return captured_tasks["check_round_trip"]
+    return captured_tasks
 
 
 class QueryResult:
@@ -180,43 +180,113 @@ class ClickHouseProbeTests(unittest.TestCase):
         self.assertTrue(client.closed)
 
 
+DELIVERED_PARTITION = 3
+DELIVERED_OFFSET = 42
+
+
+class StubMessage:
+    """Сообщение Kafka в том объёме, в каком его читает пробник."""
+
+    def __init__(self, value: bytes) -> None:
+        self._value = value
+
+    def partition(self) -> int:
+        return DELIVERED_PARTITION
+
+    def offset(self) -> int:
+        return DELIVERED_OFFSET
+
+    def error(self):
+        return None
+
+    def value(self) -> bytes:
+        return self._value
+
+
+class StubTopicPartition:
+    def __init__(self, topic: str, partition: int, offset: int) -> None:
+        self.topic = topic
+        self.partition = partition
+        self.offset = offset
+
+
+def install_kafka_stub(produce_error: str | None = None):
+    """Ставит заглушку `confluent_kafka` и возвращает журналы её клиентов.
+
+    Продюсер подтверждает доставку сразу и по известному адресу, консьюмер
+    отдаёт записанное с первого опроса. Если задан `produce_error`, запись
+    падает — так проверяется, что продюсер закрывается и на пути отказа.
+    """
+    producers = []
+    consumers = []
+
+    class Producer:
+        def __init__(self, _config) -> None:
+            self.written = b""
+            self.flushed = False
+            producers.append(self)
+
+        def produce(self, _topic, key=None, value=None, on_delivery=None) -> None:
+            if produce_error is not None:
+                raise RuntimeError(produce_error)
+            self.written = value
+            on_delivery(None, StubMessage(value))
+
+        def flush(self, _timeout) -> int:
+            self.flushed = True
+            return 0
+
+    class Consumer:
+        def __init__(self, _config) -> None:
+            self.assigned = []
+            self.closed = False
+            consumers.append(self)
+
+        def assign(self, partitions) -> None:
+            self.assigned = partitions
+
+        def poll(self, _timeout):
+            return StubMessage(producers[-1].written)
+
+        def close(self) -> None:
+            self.closed = True
+
+    kafka_module = types.ModuleType("confluent_kafka")
+    kafka_module.Consumer = Consumer
+    kafka_module.Producer = Producer
+    kafka_module.TopicPartition = StubTopicPartition
+    sys.modules["confluent_kafka"] = kafka_module
+    return producers, consumers
+
+
 class KafkaProbeTests(unittest.TestCase):
-    def test_producer_flushes_when_consumer_creation_fails(self) -> None:
-        kafka_module = types.ModuleType("confluent_kafka")
-        flush_timeouts = []
+    def test_producer_is_closed_when_write_fails(self) -> None:
+        producers, _ = install_kafka_stub(produce_error="брокер недоступен")
+        tasks = load_kafka_dag_tasks()
 
-        class Message:
-            def partition(self) -> int:
-                return 0
+        with self.assertRaisesRegex(RuntimeError, "брокер недоступен"):
+            tasks["write_marker"]()
 
-            def offset(self) -> int:
-                return 1
+        self.assertEqual(len(producers), 1)
+        self.assertTrue(producers[0].flushed)
 
-        class Producer:
-            def __init__(self, _config) -> None:
-                pass
+    def test_read_goes_to_the_address_broker_returned(self) -> None:
+        _, consumers = install_kafka_stub()
+        tasks = load_kafka_dag_tasks()
 
-            def produce(self, _topic, **kwargs) -> None:
-                kwargs["on_delivery"](None, Message())
+        written = tasks["write_marker"]()
+        tasks["read_marker"](written)
 
-            def flush(self, timeout: int) -> int:
-                flush_timeouts.append(timeout)
-                return 0
-
-        class Consumer:
-            def __init__(self, _config) -> None:
-                raise RuntimeError("чтение недоступно")
-
-        kafka_module.Consumer = Consumer
-        kafka_module.Producer = Producer
-        kafka_module.TopicPartition = object
-        sys.modules["confluent_kafka"] = kafka_module
-        check_round_trip = load_kafka_dag_task()
-
-        with self.assertRaisesRegex(RuntimeError, "чтение недоступно"):
-            check_round_trip()
-
-        self.assertEqual(flush_timeouts, [10, 1])
+        self.assertEqual(
+            (written["partition"], written["offset"]),
+            (DELIVERED_PARTITION, DELIVERED_OFFSET),
+        )
+        self.assertEqual(len(consumers), 1)
+        self.assertEqual(len(consumers[0].assigned), 1)
+        assigned = consumers[0].assigned[0]
+        self.assertEqual(assigned.partition, DELIVERED_PARTITION)
+        self.assertEqual(assigned.offset, DELIVERED_OFFSET)
+        self.assertTrue(consumers[0].closed)
 
 
 def run_tests() -> int:
