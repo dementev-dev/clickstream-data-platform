@@ -61,7 +61,7 @@ check_failure_guards() {
 
     failure_log="$(mktemp)"
     started_at="$(date +%s)"
-    setsid make --no-print-directory -C "$ROOT_DIR" smoke >"$failure_log" 2>&1 &
+    setsid make --no-print-directory -C "$ROOT_DIR" smoke-cluster >"$failure_log" 2>&1 &
     failure_pid=$!
     if wait_for_local_table; then
         compose kill clickhouse-02 >/dev/null
