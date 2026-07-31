@@ -10,10 +10,14 @@ compose() {
     docker compose --project-directory "$ROOT_DIR" "$@"
 }
 
+# Ввод закрыт намеренно: у запроса INSERT clickhouse-client дочитывает данные
+# из стандартного ввода и ждёт его конца. Если проверку запустили не из
+# терминала, а из фонового процесса с открытым вводом, конца не наступает
+# никогда, и команда висит без сообщений.
 query() {
     local service="$1"
     local sql="$2"
-    compose exec -T "$service" clickhouse-client --query "$sql"
+    compose exec -T "$service" clickhouse-client --query "$sql" </dev/null
 }
 
 query_with_timeout() {
