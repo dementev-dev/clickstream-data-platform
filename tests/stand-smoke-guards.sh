@@ -75,17 +75,20 @@ break_clickhouse_probe() {
     return 1
 }
 
+# Пробник разбит на четыре задачи, и упасть может любая из них: поломка на ноде
+# 2 видна и проверке набора таблиц, и чтению маркера. Поэтому берём последний
+# каталог запуска целиком и ищем образец по журналам всех его задач.
 clickhouse_break_is_reported() {
     compose exec -T airflow-scheduler bash -ceu '
         latest="$(
             find /opt/airflow/logs/dag_id=test_clickhouse \
-                -type f -name "attempt=1.log" -printf "%T@ %p\n" |
+                -mindepth 1 -maxdepth 1 -type d -name "run_id=*" -printf "%T@ %p\n" |
                 sort -nr |
                 head -n 1
         )"
         latest="${latest#* }"
         test -n "$latest"
-        grep -Eq \
+        grep -Eqr --include="attempt=1.log" \
             "неверный набор таблиц на ноде 2|Unknown table expression identifier '\''default.airflow_probe_local'\''" \
             "$latest"
     '

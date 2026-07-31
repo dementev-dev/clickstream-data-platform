@@ -9,9 +9,17 @@ import unittest
 from pathlib import Path
 
 
-def load_clickhouse_dag_module():
+class DeclaredTask:
+    """Заглушка объявленной задачи: держит только цепочку через `>>`."""
+
+    def __rshift__(self, other):
+        return other
+
+
+def load_clickhouse_dag_tasks():
     airflow_module = types.ModuleType("airflow")
     sdk_module = types.ModuleType("airflow.sdk")
+    captured_tasks = {}
 
     def dag(**_kwargs):
         def decorate(function):
@@ -19,11 +27,16 @@ def load_clickhouse_dag_module():
 
         return decorate
 
-    def task(function):
-        def declare_task(*_args, **_kwargs):
-            return None
+    def task(function=None, **_kwargs):
+        def capture(target):
+            captured_tasks[target.__name__] = target
 
-        return declare_task
+            def declare_task(*_args, **_kwargs):
+                return DeclaredTask()
+
+            return declare_task
+
+        return capture(function) if function is not None else capture
 
     sdk_module.Connection = object
     sdk_module.dag = dag
@@ -39,7 +52,7 @@ def load_clickhouse_dag_module():
         raise RuntimeError("не удалось загрузить модуль пробника ClickHouse")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    return module, captured_tasks
 
 
 def load_kafka_dag_task():
@@ -77,12 +90,26 @@ def load_kafka_dag_task():
     return captured_tasks["check_round_trip"]
 
 
-class FailingCleanupClient:
-    def __init__(self) -> None:
-        self.closed = False
+class QueryResult:
+    def __init__(self, result_rows: list[tuple]) -> None:
+        self.result_rows = result_rows
 
-    def command(self, _sql: str) -> None:
-        raise RuntimeError("очистка недоступна")
+
+class RecordingClient:
+    """Клиент ClickHouse, который запоминает запросы и отвечает заготовкой."""
+
+    def __init__(self, remaining_tables: list[tuple[str, str]] | None = None) -> None:
+        self.commands: list[str] = []
+        self.queries: list[str] = []
+        self.closed = False
+        self._remaining_tables = remaining_tables or []
+
+    def command(self, sql: str) -> None:
+        self.commands.append(" ".join(sql.split()))
+
+    def query(self, sql: str, parameters=None) -> QueryResult:
+        self.queries.append(" ".join(sql.split()))
+        return QueryResult(list(self._remaining_tables))
 
     def close(self) -> None:
         self.closed = True
@@ -91,40 +118,66 @@ class FailingCleanupClient:
 class ClickHouseProbeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.module = load_clickhouse_dag_module()
+        cls.module, cls.tasks = load_clickhouse_dag_tasks()
+
+    def run_cleanup_task(self, client: RecordingClient) -> None:
+        original_client_factory = self.module._clickhouse_client
+        self.module._clickhouse_client = lambda: client
+        try:
+            self.tasks["cleanup_tables"]()
+        finally:
+            self.module._clickhouse_client = original_client_factory
 
     def test_marker_path_requires_different_nodes_and_first_shard(self) -> None:
         marker = "свой-маркер"
         self.module._assert_marker_path(
-            local_rows=[("clickhouse-01-host", marker)],
             distributed_rows=[(1, "clickhouse-01-host", marker)],
+            write_hostname="clickhouse-01-host",
             node_2_hostname="clickhouse-02-host",
             marker=marker,
         )
 
         with self.assertRaisesRegex(RuntimeError, "разных нод"):
             self.module._assert_marker_path(
-                local_rows=[("clickhouse-02-host", marker)],
                 distributed_rows=[(2, "clickhouse-02-host", marker)],
+                write_hostname="clickhouse-02-host",
                 node_2_hostname="clickhouse-02-host",
                 marker=marker,
             )
         with self.assertRaisesRegex(RuntimeError, "первого шарда"):
             self.module._assert_marker_path(
-                local_rows=[("clickhouse-01-host", marker)],
                 distributed_rows=[(2, "clickhouse-01-host", marker)],
+                write_hostname="clickhouse-01-host",
                 node_2_hostname="clickhouse-02-host",
                 marker=marker,
             )
 
-    def test_cleanup_keeps_original_error_as_primary(self) -> None:
-        client = FailingCleanupClient()
-        original_error = RuntimeError("маркер не найден")
+    def test_cleanup_drops_tables_and_checks_both_nodes(self) -> None:
+        client = RecordingClient()
 
-        self.module._cleanup_clickhouse_client(client, original_error)
+        self.run_cleanup_task(client)
+
+        dropped = {
+            table
+            for table in (self.module.LOCAL_TABLE, self.module.DISTRIBUTED_TABLE)
+            if any(
+                command.startswith(f"DROP TABLE IF EXISTS default.{table} ")
+                for command in client.commands
+            )
+        }
+        self.assertEqual(
+            dropped, {self.module.LOCAL_TABLE, self.module.DISTRIBUTED_TABLE}
+        )
+        self.assertEqual(len(client.queries), len(self.module.NODES))
+        self.assertTrue(client.closed)
+
+    def test_cleanup_closes_client_when_tables_survive(self) -> None:
+        client = RecordingClient(remaining_tables=[("airflow_probe_local", "Log")])
+
+        with self.assertRaisesRegex(RuntimeError, "служебные таблицы остались"):
+            self.run_cleanup_task(client)
 
         self.assertTrue(client.closed)
-        self.assertIn("очистка недоступна", "\n".join(original_error.__notes__))
 
 
 class KafkaProbeTests(unittest.TestCase):
