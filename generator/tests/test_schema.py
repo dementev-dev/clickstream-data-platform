@@ -16,6 +16,60 @@ from clickstream_generator.schema import COLUMNS, Column, ColumnGroup
 # Состав решён мастер-спекой (раздел 1.2) и в этом тикете не переоткрывается.
 EXPECTED_COLUMN_COUNT = 47
 
+# Тот же состав, переписанный с мастер-спеки отдельно от контракта: группа,
+# имя, тип. Дубль намеренный — только независимая запись ловит молчаливое
+# переименование колонки, подмену типа или перестановку. Правка контракта без
+# правки спеки краснеет здесь, и это единственный способ узнать о ней вовремя.
+MASTER_SPEC_COMPOSITION = (
+    (ColumnGroup.IDENTIFIERS, "WatchID", "UInt64"),
+    (ColumnGroup.IDENTIFIERS, "VisitID", "UInt64"),
+    (ColumnGroup.IDENTIFIERS, "ClientID", "UInt64"),
+    (ColumnGroup.IDENTIFIERS, "CounterID", "UInt32"),
+    (ColumnGroup.IDENTIFIERS, "EventDate", "Date"),
+    (ColumnGroup.IDENTIFIERS, "UTCEventTime", "DateTime"),
+    (ColumnGroup.IDENTIFIERS, "ClientTimeZone", "Int16"),
+    (ColumnGroup.IDENTIFIERS, "EventType", "LowCardinality(String)"),
+    (ColumnGroup.IDENTIFIERS, "Sign", "Int8"),
+    (ColumnGroup.PAGE, "URL", "String"),
+    (ColumnGroup.PAGE, "Referer", "String"),
+    (ColumnGroup.PAGE, "Title", "String"),
+    (ColumnGroup.PAGE, "UTMSource", "String"),
+    (ColumnGroup.PAGE, "UTMMedium", "String"),
+    (ColumnGroup.PAGE, "UTMCampaign", "String"),
+    (ColumnGroup.PAGE, "UTMContent", "String"),
+    (ColumnGroup.PAGE, "UTMTerm", "String"),
+    (ColumnGroup.PAGE, "LastTrafficSource", "String"),
+    (ColumnGroup.PAGE, "HasGCLID", "UInt8"),
+    (ColumnGroup.PAGE, "YCLID", "UInt64"),
+    (ColumnGroup.CLIENT, "Browser", "String"),
+    (ColumnGroup.CLIENT, "BrowserMajorVersion", "UInt16"),
+    (ColumnGroup.CLIENT, "BrowserLanguage", "String"),
+    (ColumnGroup.CLIENT, "OperatingSystem", "String"),
+    (ColumnGroup.CLIENT, "OperatingSystemRoot", "String"),
+    (ColumnGroup.CLIENT, "DeviceCategory", "UInt8"),
+    (ColumnGroup.CLIENT, "MobilePhoneModel", "String"),
+    (ColumnGroup.CLIENT, "ScreenWidth", "UInt16"),
+    (ColumnGroup.CLIENT, "ScreenHeight", "UInt16"),
+    (ColumnGroup.CLIENT, "IPAddress", "String"),
+    (ColumnGroup.CLIENT, "RegionCountry", "String"),
+    (ColumnGroup.CLIENT, "RegionCity", "String"),
+    (ColumnGroup.CLIENT, "RegionCountryID", "UInt32"),
+    (ColumnGroup.CLIENT, "RegionCityID", "UInt32"),
+    (ColumnGroup.PARAMS, "GoalsReached", "Array(UInt32)"),
+    (ColumnGroup.PARAMS, "ParsedParamsKey1", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "purchaseID", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "purchaseRevenue", "Array(Float64)"),
+    (ColumnGroup.ECOMMERCE, "purchaseCurrency", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "purchaseCoupon", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "productID", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "productName", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "productCategory", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "productPrice", "Array(Int64)"),
+    (ColumnGroup.ECOMMERCE, "productQuantity", "Array(UInt64)"),
+    (ColumnGroup.ECOMMERCE, "productEventType", "Array(String)"),
+    (ColumnGroup.ECOMMERCE, "ecommerce", "String"),
+)
+
 # Соответствие «тип ClickHouse — тип numpy», записанное независимо от
 # контракта: если пара в контракте разъедется, сойтись они уже не смогут.
 NUMPY_BY_CLICKHOUSE_TYPE = {
@@ -50,6 +104,14 @@ def test_columns_are_an_immutable_sequence():
 
 def test_column_count():
     assert len(COLUMNS) == EXPECTED_COLUMN_COUNT
+
+
+def test_composition_matches_master_spec():
+    """Состав, имена, типы и порядок — те же, что в разделе 1.2 мастер-спеки."""
+    composition = tuple(
+        (column.group, column.name, column.clickhouse_type) for column in COLUMNS
+    )
+    assert composition == MASTER_SPEC_COMPOSITION
 
 
 def test_metrica_names_are_unique():

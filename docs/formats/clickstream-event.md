@@ -47,9 +47,9 @@ DDS». Столбец «Тип numpy» показывает, чем колонк
 | 15 | `UTMCampaign` | `String` | `object` | `utm_campaign` | метка utm_campaign: рекламная кампания |
 | 16 | `UTMContent` | `String` | `object` | `utm_content` | метка utm_content: что различает объявления одной кампании |
 | 17 | `UTMTerm` | `String` | `object` | `utm_term` | метка utm_term: ключевое слово перехода |
-| 18 | `LastTrafficSource` | `String` | `object` | `last_traffic_source` | последний источник трафика: direct, organic, ad, referral |
+| 18 | `LastTrafficSource` | `String` | `object` | `last_traffic_source` | последний источник трафика: organic, direct, ad и подобные |
 | 19 | `HasGCLID` | `UInt8` | `uint8` | `has_gclid` | 1, если в адресе была метка Google Ads |
-| 20 | `YCLID` | `UInt64` | `uint64` | `yclid` | идентификатор клика Яндекс Директа; 0 — метки не было |
+| 20 | `YCLID` | `UInt64` | `uint64` | `yclid` | id клика Яндекс Директа; без метки — 0 |
 
 ## Браузер, устройство, гео
 
@@ -60,7 +60,7 @@ DDS». Столбец «Тип numpy» показывает, чем колонк
 | 23 | `BrowserLanguage` | `String` | `object` | `browser_language` | язык браузера |
 | 24 | `OperatingSystem` | `String` | `object` | `operating_system` | операционная система с версией |
 | 25 | `OperatingSystemRoot` | `String` | `object` | `operating_system_root` | семейство операционной системы, без версии |
-| 26 | `DeviceCategory` | `UInt8` | `uint8` | `device_category` | тип устройства кодами 1–4, как у Метрики; у неё это строка — отступление стенда |
+| 26 | `DeviceCategory` | `UInt8` | `uint8` | `device_category` | тип устройства кодами Метрики: 1 — десктоп, 2 — телефон, 3 — планшет, 4 — телевизор; у Метрики это строка, у нас число |
 | 27 | `MobilePhoneModel` | `String` | `object` | `mobile_phone_model` | модель телефона; на десктопе пусто |
 | 28 | `ScreenWidth` | `UInt16` | `uint16` | `screen_width` | ширина экрана в пикселях |
 | 29 | `ScreenHeight` | `UInt16` | `uint16` | `screen_height` | высота экрана в пикселях |

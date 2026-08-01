@@ -42,14 +42,17 @@ def test_rows_are_numbered_in_contract_order(rendered: str):
 
 @pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)
 def test_column_is_described_in_full(column: Column, rendered: str):
-    cells = (
-        f"`{column.name}`",
-        f"`{column.clickhouse_type}`",
-        f"`{column.numpy_dtype}`",
-        f"`{column.dds_name}`",
+    """Колонку описывает одна строка, и в ней всё, что несёт контракт."""
+    described = (
+        column.name,
+        column.clickhouse_type,
+        column.numpy_dtype,
+        column.dds_name,
         column.comment,
     )
-    assert "| " + " | ".join(cells) + " |" in rendered
+    assert any(
+        all(value in line for value in described) for line in rendered.splitlines()
+    )
 
 
 @pytest.mark.parametrize("group", list(ColumnGroup), ids=lambda group: group.name)

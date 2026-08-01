@@ -9,7 +9,6 @@
 """
 
 import argparse
-from collections.abc import Sequence
 from itertools import groupby
 from pathlib import Path
 
@@ -44,18 +43,18 @@ TABLE_HEADER = (
 )
 
 
-def render(columns: Sequence[Column] = COLUMNS) -> str:
+def render() -> str:
     """Собирает документ целиком: преамбула и таблица колонок по группам."""
-    lines = PREAMBLE.format(count=len(columns)).splitlines()
-    numbers = iter(range(1, len(columns) + 1))
-    for group, columns_of_group in groupby(columns, key=lambda column: column.group):
+    lines = PREAMBLE.format(count=len(COLUMNS)).splitlines()
+    numbers = iter(range(1, len(COLUMNS) + 1))
+    for group, columns_of_group in groupby(COLUMNS, key=lambda column: column.group):
         lines += ["", f"## {group.value}", "", *TABLE_HEADER]
-        lines += [row(next(numbers), column) for column in columns_of_group]
+        lines += [table_row(next(numbers), column) for column in columns_of_group]
     return "\n".join(lines) + "\n"
 
 
-def row(number: int, column: Column) -> str:
-    """Строка таблицы; номер — место колонки в порядке выгрузки."""
+def table_row(number: int, column: Column) -> str:
+    """Строка таблицы колонок; номер — место колонки в порядке выгрузки."""
     cells = (
         str(number),
         f"`{column.name}`",
@@ -67,12 +66,12 @@ def row(number: int, column: Column) -> str:
     return "| " + " | ".join(cells) + " |"
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Собирает описание выгрузки из контракта схемы события."
     )
     parser.add_argument("output", type=Path, help="путь к файлу описания")
-    output = parser.parse_args(argv).output
+    output = parser.parse_args().output
     output.write_text(render(), encoding="utf-8")
     print(f"Описание выгрузки собрано: {output}")
 
