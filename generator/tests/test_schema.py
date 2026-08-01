@@ -1,0 +1,100 @@
+"""Инварианты контракта схемы события.
+
+Контракт — чистые данные, поэтому проверять в нём нечего кроме связности:
+состав, уникальность имён, заполненность полей, согласие типов и порядок.
+Это и есть сторож границы «трекер | хранилище»: молчаливый дрейф колонок
+ловится здесь, а не в DDL через неделю.
+"""
+
+import re
+
+import numpy as np
+import pytest
+
+from clickstream_generator.schema import COLUMNS, Column, ColumnGroup
+
+# Состав решён мастер-спекой (раздел 1.2) и в этом тикете не переоткрывается.
+EXPECTED_COLUMN_COUNT = 47
+
+# Соответствие «тип ClickHouse — тип numpy», записанное независимо от
+# контракта: если пара в контракте разъедется, сойтись они уже не смогут.
+NUMPY_BY_CLICKHOUSE_TYPE = {
+    "UInt8": "uint8",
+    "UInt16": "uint16",
+    "UInt32": "uint32",
+    "UInt64": "uint64",
+    "Int8": "int8",
+    "Int16": "int16",
+    "Int64": "int64",
+    "Float64": "float64",
+    "String": "object",
+    "LowCardinality(String)": "object",
+    "Date": "datetime64[D]",
+    "DateTime": "datetime64[s]",
+}
+
+METRICA_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+DDS_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+ARRAY_TYPE = re.compile(r"^Array\((.+)\)$")
+
+
+def element_type(clickhouse_type: str) -> str:
+    """Тип элемента: у массива — то, что внутри `Array(...)`, иначе сам тип."""
+    array = ARRAY_TYPE.match(clickhouse_type)
+    return array.group(1) if array else clickhouse_type
+
+
+def test_columns_are_an_immutable_sequence():
+    assert isinstance(COLUMNS, tuple)
+
+
+def test_column_count():
+    assert len(COLUMNS) == EXPECTED_COLUMN_COUNT
+
+
+def test_metrica_names_are_unique():
+    names = [column.name for column in COLUMNS]
+    assert len(set(names)) == len(names)
+
+
+def test_dds_names_are_unique():
+    names = [column.dds_name for column in COLUMNS]
+    assert len(set(names)) == len(names)
+
+
+@pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)
+def test_attributes_are_filled(column: Column):
+    assert column.name.strip()
+    assert column.clickhouse_type.strip()
+    assert column.numpy_dtype.strip()
+    assert column.dds_name.strip()
+    assert column.comment.strip()
+    assert isinstance(column.group, ColumnGroup)
+
+
+@pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)
+def test_names_keep_their_styles(column: Column):
+    assert METRICA_NAME.match(column.name), "имя источника — как в выгрузке Метрики"
+    assert DDS_NAME.match(column.dds_name), "имя для DDS — snake_case"
+
+
+@pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)
+def test_numpy_dtype_exists(column: Column):
+    assert np.dtype(column.numpy_dtype).name == column.numpy_dtype
+
+
+@pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)
+def test_numpy_dtype_matches_clickhouse_type(column: Column):
+    expected = NUMPY_BY_CLICKHOUSE_TYPE.get(element_type(column.clickhouse_type))
+    assert expected is not None, f"незнакомый тип ClickHouse: {column.clickhouse_type}"
+    assert column.numpy_dtype == expected
+
+
+def test_groups_go_in_runs_and_in_order():
+    """Группы не чередуются: каждая идёт одним куском, куски — по объявлению."""
+    seen = []
+    for column in COLUMNS:
+        if not seen or seen[-1] is not column.group:
+            assert column.group not in seen, f"группа {column.group.name} разорвана"
+            seen.append(column.group)
+    assert seen == list(ColumnGroup), "порядок групп разошёлся с их объявлением"
