@@ -18,7 +18,6 @@ set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly README="$ROOT_DIR/README.md"
-readonly SMOKE="$ROOT_DIR/scripts/stand-smoke.sh"
 passed=0
 
 fail() {
@@ -93,25 +92,10 @@ restart_lesson_present() {
     ' "$README"
 }
 
-# Единица памяти в отчёте проверки — русская «ГБ», а не латинская «GB»
-# (контракт языка из AGENTS.md). Здесь успех — это отсутствие образца, поэтому
-# код возврата grep разбирается вручную: 1 — не нашли, и это хорошо; 0 — нашли
-# латинское; больше 1 — сам grep не отработал, и молчать об этом нельзя.
-smoke_uses_russian_unit() {
-    local status=0
-    grep -q '3,4 GB' "$SMOKE" || status=$?
-    case "$status" in
-        1) return 0 ;;
-        0) return 1 ;;
-        *) fail "не удалось проверить обозначение единицы памяти в $SMOKE" ;;
-    esac
-}
-
 check 'README перечисляет HTTP- и нативные порты обеих нод' ports_documented
 check 'README объясняет сброс томов после смены исходных учётных данных' clean_advice_present
 check 'список портов остаётся единым списком' ports_stay_one_list
 check 'README перечисляет малые проверки пробников в составе config-test' probe_checks_documented
 check 'README требует перезапуск ClickHouse после изменения настройки метрик' restart_lesson_present
-check 'отчёт проверки использует русское обозначение ГБ' smoke_uses_russian_unit
 
 printf 'ИТОГ: пройдено %d, ошибок 0\n' "$passed"

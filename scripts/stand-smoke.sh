@@ -590,41 +590,40 @@ check_superset() {
     fi
 }
 
-check_memory_budget() {
-    local -a ids=()
+# Убитый за память контейнер Docker поднимает сам, и проверка здоровья об этом
+# промолчит. Порога здесь нет: это «да или нет», а не бюджет памяти (ADR 0004).
+check_containers_survived() {
     local container_id
     local service
-    local total_mib
+    local state
+    local problems=0
 
-    sleep 20
     for service in "${LONG_LIVED_SERVICES[@]}"; do
-        container_id="$(compose ps --status running --quiet "$service" 2>/dev/null || true)"
+        container_id="$(compose ps --all --quiet "$service" 2>/dev/null || true)"
         if [[ -z "$container_id" || "$container_id" == *$'\n'* ]]; then
-            fail "не удалось получить работающий контейнер ${service} для измерения памяти"
+            fail "не удалось получить контейнер ${service} для проверки перезапусков"
             return
         fi
-        ids+=("$container_id")
+        state="$(docker inspect --format '{{.State.OOMKilled}}/{{.RestartCount}}' "$container_id" 2>/dev/null || true)"
+        case "$state" in
+            false/0) ;;
+            # OOMKilled встаёт и когда убит процесс внутри живого контейнера.
+            true/*)
+                fail "в контейнере ${service} ядро убило процесс из-за нехватки памяти"
+                problems=$((problems + 1))
+                ;;
+            false/*)
+                fail "контейнер ${service} перезапускался, счётчик Docker — ${state#*/}"
+                problems=$((problems + 1))
+                ;;
+            *)
+                fail "Docker не рассказал о состоянии контейнера ${service}"
+                problems=$((problems + 1))
+                ;;
+        esac
     done
-    if ! total_mib="$(docker stats --no-stream --format '{{.MemUsage}}' "${ids[@]}" 2>/dev/null | awk -v expected="${#ids[@]}" '
-        $1 ~ /GiB$/ {sub(/GiB$/, "", $1); total += $1 * 1024; next}
-        $1 ~ /MiB$/ {sub(/MiB$/, "", $1); total += $1; next}
-        $1 ~ /KiB$/ {sub(/KiB$/, "", $1); total += $1 / 1024; next}
-        $1 ~ /GB$/  {sub(/GB$/, "", $1); total += $1 * 1000 / 1.048576; next}
-        $1 ~ /MB$/  {sub(/MB$/, "", $1); total += $1 / 1.048576; next}
-        $1 ~ /kB$/  {sub(/kB$/, "", $1); total += $1 / 1048.576; next}
-        {invalid = 1}
-        END {
-            if (invalid || NR != expected) exit 1
-            printf "%.1f", total
-        }
-    ')"; then
-        fail 'Docker не вернул полное измерение памяти стенда'
-        return
-    fi
-    if awk -v total="$total_mib" 'BEGIN {exit !(total <= 3242.5)}'; then
-        pass "стенд занимает ${total_mib} MiB после 20 секунд покоя, порог 3,4 ГБ не превышен"
-    else
-        fail "стенд занимает ${total_mib:-неизвестно} MiB после 20 секунд покоя, это больше 3,4 ГБ"
+    if [[ "$problems" -eq 0 ]]; then
+        pass 'ни в одном долгоживущем контейнере ядро не убивало процессы за память, и никто не перезапускался сам'
     fi
 }
 
@@ -638,7 +637,7 @@ if check_host_dependencies; then
     check_grafana_datasource
     check_airflow
     check_superset
-    check_memory_budget
+    check_containers_survived
 else
     fail 'проверки контейнеров, Kafka, Airflow, Superset, Prometheus и Grafana пропущены без зависимостей машины'
 fi
