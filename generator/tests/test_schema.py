@@ -87,6 +87,60 @@ NUMPY_BY_CLICKHOUSE_TYPE = {
     "DateTime": "datetime64[s]",
 }
 
+# Имена для DDS — не производная от имён Метрики, а решение тикета #36:
+# вывести их правилом нельзя (акронимы, «timezone» одним словом), поэтому
+# сверять их не с чем, кроме такой же независимой записи. Без неё осмысленно
+# неверное имя молча уезжает в опубликованное описание выгрузки.
+EXPECTED_DDS_NAMES = {
+    "WatchID": "watch_id",
+    "VisitID": "visit_id",
+    "ClientID": "client_id",
+    "CounterID": "counter_id",
+    "EventDate": "event_date",
+    "UTCEventTime": "utc_event_time",
+    "ClientTimeZone": "client_timezone",
+    "EventType": "event_type",
+    "Sign": "sign",
+    "URL": "url",
+    "Referer": "referer",
+    "Title": "title",
+    "UTMSource": "utm_source",
+    "UTMMedium": "utm_medium",
+    "UTMCampaign": "utm_campaign",
+    "UTMContent": "utm_content",
+    "UTMTerm": "utm_term",
+    "LastTrafficSource": "last_traffic_source",
+    "HasGCLID": "has_gclid",
+    "YCLID": "yclid",
+    "Browser": "browser",
+    "BrowserMajorVersion": "browser_major_version",
+    "BrowserLanguage": "browser_language",
+    "OperatingSystem": "operating_system",
+    "OperatingSystemRoot": "operating_system_root",
+    "DeviceCategory": "device_category",
+    "MobilePhoneModel": "mobile_phone_model",
+    "ScreenWidth": "screen_width",
+    "ScreenHeight": "screen_height",
+    "IPAddress": "ip_address",
+    "RegionCountry": "region_country",
+    "RegionCity": "region_city",
+    "RegionCountryID": "region_country_id",
+    "RegionCityID": "region_city_id",
+    "GoalsReached": "goals_reached",
+    "ParsedParamsKey1": "parsed_params_key1",
+    "purchaseID": "purchase_id",
+    "purchaseRevenue": "purchase_revenue",
+    "purchaseCurrency": "purchase_currency",
+    "purchaseCoupon": "purchase_coupon",
+    "productID": "product_id",
+    "productName": "product_name",
+    "productCategory": "product_category",
+    "productPrice": "product_price",
+    "productQuantity": "product_quantity",
+    "productEventType": "product_event_type",
+    "ecommerce": "ecommerce",
+}
+
 METRICA_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 DDS_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 ARRAY_TYPE = re.compile(r"^Array\((.+)\)$")
@@ -122,6 +176,11 @@ def test_metrica_names_are_unique():
 def test_dds_names_are_unique():
     names = [column.dds_name for column in COLUMNS]
     assert len(set(names)) == len(names)
+
+
+def test_dds_names_are_the_ones_we_chose():
+    """Переименование колонки в DDS — решение, а не правка мимоходом."""
+    assert {column.name: column.dds_name for column in COLUMNS} == EXPECTED_DDS_NAMES
 
 
 @pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)

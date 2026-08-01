@@ -429,7 +429,8 @@ COLUMNS: tuple[Column, ...] = (
         numpy_dtype="object",
         dds_name="product_event_type",
         group=ColumnGroup.ECOMMERCE,
-        comment="действие с товаром: detail, add, remove, purchase",
+        comment="действие с товаром: стенд шлёт add и purchase, полный"
+        " словарь Метрики (detail, remove, impressions) не берём",
     ),
     Column(
         name="ecommerce",

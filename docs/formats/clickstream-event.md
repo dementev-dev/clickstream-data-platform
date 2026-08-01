@@ -90,5 +90,5 @@ DDS». Столбец «Тип numpy» показывает, чем колонк
 | 43 | `productCategory` | `Array(String)` | `object` | `product_category` | категории тех же товаров |
 | 44 | `productPrice` | `Array(Int64)` | `int64` | `product_price` | цена за штуку целым числом: деньги генератор считает целыми |
 | 45 | `productQuantity` | `Array(UInt64)` | `uint64` | `product_quantity` | количество штук каждого товара |
-| 46 | `productEventType` | `Array(String)` | `object` | `product_event_type` | действие с товаром: detail, add, remove, purchase |
+| 46 | `productEventType` | `Array(String)` | `object` | `product_event_type` | действие с товаром: стенд шлёт add и purchase, полный словарь Метрики (detail, remove, impressions) не берём |
 | 47 | `ecommerce` | `String` | `object` | `ecommerce` | сырой JSON события, как отдаёт Метрика — материал лабы про разбор JSON внутри колонки |

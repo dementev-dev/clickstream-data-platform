@@ -16,7 +16,9 @@ from clickstream_generator.schema_doc import render
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOC_PATH = REPO_ROOT / "docs" / "formats" / "clickstream-event.md"
 
-TABLE_ROW = re.compile(r"^\| \d+ \|", re.MULTILINE)
+# Номер и имя колонки из строки таблицы: по ним сверяется не только состав
+# документа, но и его порядок — по нему сторона хранилища выпишет колонки.
+TABLE_ROW = re.compile(r"^\| (\d+) \| `([^`]+)` \|", re.MULTILINE)
 
 
 @pytest.fixture(scope="module")
@@ -35,9 +37,11 @@ def test_every_column_has_a_row(rendered: str):
     assert len(TABLE_ROW.findall(rendered)) == len(COLUMNS)
 
 
-def test_rows_are_numbered_in_contract_order(rendered: str):
-    numbers = [int(row.strip("| ")) for row in TABLE_ROW.findall(rendered)]
-    assert numbers == list(range(1, len(COLUMNS) + 1))
+def test_rows_follow_contract_order(rendered: str):
+    """Строки идут в порядке контракта, а не просто нумеруются с 1 по 47."""
+    rows = [(int(number), name) for number, name in TABLE_ROW.findall(rendered)]
+    expected = [(number, column.name) for number, column in enumerate(COLUMNS, 1)]
+    assert rows == expected
 
 
 @pytest.mark.parametrize("column", COLUMNS, ids=lambda column: column.name)
