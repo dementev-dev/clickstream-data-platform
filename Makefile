@@ -1,6 +1,6 @@
 COMPOSE ?= docker compose
 
-.PHONY: up down clean ps logs config-test smoke smoke-cluster smoke-guards
+.PHONY: up down clean ps logs config-test lint test docs smoke smoke-cluster smoke-guards
 
 up:
 	$(COMPOSE) up --detach --build --wait --wait-timeout 600
@@ -20,6 +20,16 @@ logs:
 config-test:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/config-test.sh
 	./tests/stand-smoke-static.sh
+
+lint:
+	cd generator && uv run ruff check && uv run ruff format --check
+
+test:
+	cd generator && uv run pytest
+
+docs:
+	cd generator && uv run python -m clickstream_generator.schema_doc \
+		../docs/formats/clickstream-event.md
 
 smoke:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-smoke.sh
