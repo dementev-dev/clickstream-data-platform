@@ -51,7 +51,7 @@ def test_column_is_described_in_full(column: Column, rendered: str):
         column.name,
         column.clickhouse_type,
         column.numpy_dtype,
-        column.dds_name,
+        column.normalized_name,
         column.comment,
     )
     assert any(
