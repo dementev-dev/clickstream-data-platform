@@ -15,10 +15,7 @@ x-clickhouse-common: &clickhouse-common
     clickhouse-keeper:
       condition: service_healthy
   ulimits: *clickhouse-nofile
-  # Не гигабайт: около 550 МиБ от RSS праздной ноды — страницы её собственного
-  # бинарника, и рабочего места почти не оставалось. Лимит не бронь: в покое
-  # нода занимает столько же, а коробка задаёт, где сервер включает
-  # предохранители — свои кэши и сброс на диск (ADR 0004).
+  # Гигабайта не хватало: половину съедали страницы самого бинарника (ADR 0004).
   mem_limit: 4g
   healthcheck:
     test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --query 'SELECT 1' >/dev/null 2>&1"]
