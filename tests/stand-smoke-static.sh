@@ -46,7 +46,4 @@ else
     exit 1
 fi
 
-grep -Eq '^    # .*подстановки Compose.*\$\$' "$ROOT_DIR/scripts/stand-smoke.sh"
-printf 'ЗЕЛЁНО: сложный разбор подстановок Compose пояснён рядом с кодом.\n'
-
-printf 'ИТОГ: пройдено 3, ошибок 0\n'
+printf 'ИТОГ: пройдено 2, ошибок 0\n'

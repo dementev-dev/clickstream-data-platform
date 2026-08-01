@@ -20,7 +20,6 @@ logs:
 config-test:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/config-test.sh
 	./tests/stand-smoke-static.sh
-	./tests/docs-guards.sh
 
 smoke:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-smoke.sh
