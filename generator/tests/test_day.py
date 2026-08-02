@@ -1,4 +1,4 @@
-"""День-функция: чистота, форма волны, правила резки визитов, шов для #40.
+"""День-функция: чистота, форма волны, правила резки визитов, шов с торговлей.
 
 Числа мира тесты сторожат вилками спеки, а не точными значениями: менти
 крутит конфигурацию, и падать тесты должны там, где сдвинулся вывод («средний
@@ -14,7 +14,16 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from clickstream_generator import catalog, day, plan, reference, schema, world
+from clickstream_generator import (
+    catalog,
+    commerce,
+    day,
+    ids,
+    plan,
+    reference,
+    schema,
+    world,
+)
 from clickstream_generator.reference import Page
 from clickstream_generator.seeds import CANONICAL_SEED
 
@@ -137,25 +146,36 @@ def test_every_column_of_the_contract_is_present_and_typed(weekday: day.Day):
             assert values.dtype == np.dtype(column.numpy_dtype), column.name
 
 
-def test_what_is_left_to_the_trade_ticket_is_empty_not_missing(weekday: day.Day):
+def test_a_pageview_carries_the_trade_columns_empty_not_missing(weekday: day.Day):
     """Пусто — пустой массив и пустая строка, а ключ есть у каждого события.
 
-    Проверяются все колонки будущих торговых событий, а не выбранные: тикет
-    #40 добавит свои, и они должны попасть под тот же сторож.
+    Проверяются все торговые колонки, а не выбранные: у просмотра страницы
+    пусты они все до одной, иначе строгий приём хранилища не уживётся с
+    полями, пустыми по смыслу (мастер-спека, раздел 6).
     """
-    waiting = [
+    pageview = weekday.columns["EventType"] == "pageview"
+    assert pageview.mean() > 0.9
+    trade = [
         column
         for column in schema.COLUMNS
         if column.group in (schema.ColumnGroup.ECOMMERCE, schema.ColumnGroup.PARAMS)
     ]
-    assert len(waiting) > 10
-    for column in waiting:
-        cells = weekday.columns[column.name][:1000]
+    assert len(trade) > 10
+    for column in trade:
+        cells = weekday.columns[column.name][pageview][:1000]
         if column.clickhouse_type.startswith("Array("):
             assert all(cell.size == 0 for cell in cells), column.name
         else:
             assert set(cells) == {""}, column.name
-    assert set(weekday.columns["EventType"].tolist()) == {"pageview"}
+
+
+def test_the_taxonomy_is_three_event_types(weekday: day.Day):
+    """`EventType` — добавка стенда: таксономия нужна явно (мастер-спека, 1.1)."""
+    assert set(weekday.columns["EventType"].tolist()) == {
+        "pageview",
+        commerce.ADD_TO_CART,
+        commerce.PURCHASE,
+    }
 
 
 def test_no_column_hides_a_hole(weekday: day.Day):
@@ -171,7 +191,7 @@ def test_no_column_hides_a_hole(weekday: day.Day):
 def test_identifiers_survive_json(weekday: day.Day):
     """Числа выше 2^53 в JSON округляются — идентификаторам столько не нужно."""
     for name in ("WatchID", "VisitID", "ClientID"):
-        assert weekday.columns[name].max() < day.ID_LIMIT
+        assert weekday.columns[name].max() < ids.LIMIT
         assert weekday.columns[name].dtype == np.uint64
 
 
@@ -229,7 +249,7 @@ def test_the_counter_timezone_moves_the_date_apart_from_utc(weekday: day.Day):
 
 
 def test_the_scale_of_an_average_day_is_about_fifty_thousand(weekday: day.Day):
-    """Порядок величины (спека, раздел 5); итог сложится после #40."""
+    """Порядок величины: ~50 тыс. событий в средний день (спека, раздел 5)."""
     assert 30_000 < len(weekday) < 70_000
     visits = len(set(weekday.columns["VisitID"].tolist()))
     assert 6_000 < visits < 14_000
@@ -256,7 +276,7 @@ def test_the_weekend_is_shaped_unlike_a_weekday(weekday: day.Day):
 
 def test_the_funnel_converts_about_two_percent_of_visits(weekday: day.Day):
     visits = len(set(weekday.columns["VisitID"].tolist()))
-    ordered = int((weekday.page == Page.CONFIRMATION).sum())
+    ordered = int((weekday.columns["EventType"] == commerce.PURCHASE).sum())
     assert 0.01 < ordered / visits < 0.04
 
 
@@ -270,7 +290,7 @@ def test_the_promised_orders_reach_the_confirmation(weekday: day.Day):
 
 
 def test_the_cart_always_follows_a_product_card(weekday: day.Day):
-    """Шов для #40: товар в корзине посетитель до того открывал."""
+    """Шов с торговлей: товар в корзине посетитель до того открывал."""
     order = np.lexsort((local_seconds(weekday), weekday.columns["VisitID"]))
     by_visit = weekday.page[order]
     carts = np.flatnonzero(by_visit == Page.CART)
@@ -292,11 +312,17 @@ def test_the_product_of_a_card_is_the_seam_for_trade_events(weekday: day.Day):
 
 
 def test_the_referer_is_the_page_before(weekday: day.Day):
-    """Внутри визита реферер — предыдущий адрес; на входе — адрес источника."""
-    order = np.lexsort((local_seconds(weekday), weekday.columns["VisitID"]))
-    url = weekday.columns["URL"][order]
-    referer = weekday.columns["Referer"][order]
-    visit = weekday.columns["VisitID"][order]
+    """Внутри визита реферер — предыдущий адрес; на входе — адрес источника.
+
+    Цепочка считается по просмотрам страниц: торговое событие не открывает
+    страницу, а живёт на уже открытой, и реферер у него тот же, что у неё.
+    """
+    pageview = weekday.columns["EventType"] == "pageview"
+    columns = {name: value[pageview] for name, value in weekday.columns.items()}
+    order = np.lexsort((columns["UTCEventTime"], columns["VisitID"]))
+    url = columns["URL"][order]
+    referer = columns["Referer"][order]
+    visit = columns["VisitID"][order]
     inside = np.flatnonzero(visit[1:] == visit[:-1]) + 1
     assert np.all(referer[inside] == url[inside - 1])
 

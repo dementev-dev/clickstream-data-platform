@@ -9,7 +9,9 @@
 
 Что план решает до генерации событий и чем связывает дни между собой:
 
-- приток — кто и когда впервые появился, и сколько раз вернётся;
+- приток — кто и когда впервые появился, и сколько раз вернётся; кука
+  помеченного покупателя живёт дольше прочих — это один из двух рычагов
+  метки, второй лежит в воронке дня;
 - двухкуковые пары — какой человек завёл вторую куку и в какие дни
   каждая из двух кук обязана оформить заказ;
 - паспорт куки — устройство и город: они у куки одни и те же во всех её
@@ -32,17 +34,14 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import NDArray
 
-from clickstream_generator import reference, world
+from clickstream_generator import ids, reference, world
 from clickstream_generator.seeds import cohort_stream
 from clickstream_generator.weights import pick
-
-# Куки живут числами ниже 2^53: выше JSON округляет — тот же довод, что у
-# `WatchID` в контракте схемы. Граница не достигается: 2^53 сам уже за ней.
-CLIENT_ID_LIMIT = 2**53
 
 # Кумулятивные веса: выбор по ним — целочисленный, бросок попадает в чью-то
 # долю общего веса.
 _RETURN_COUNT_CUMULATIVE = np.cumsum(world.RETURN_COUNT_WEIGHTS)
+_BUYER_RETURN_COUNT_CUMULATIVE = np.cumsum(world.BUYER_RETURN_COUNT_WEIGHTS)
 _RETURN_DELAY_CUMULATIVE = np.cumsum(world.RETURN_DELAY_WEIGHTS)
 _CITY_CUMULATIVE = np.cumsum([city.weight for city in reference.CITIES])
 _DEVICE_CUMULATIVE = np.cumsum(
@@ -182,15 +181,19 @@ def cohort(seed: int, day: int) -> Cohort:
     ]
 
     cookies = people + paired.size
-    client_id = rng.integers(1, CLIENT_ID_LIMIT, cookies, dtype=np.uint64)
+    # Кука живёт числом ниже 2^53 — тот же потолок, что у номера события:
+    # выше JSON округляет при разборе. Граница не достигается.
+    client_id = rng.integers(1, ids.LIMIT, cookies, dtype=np.uint64)
     birth_day = np.full(cookies, day, dtype=np.int64)
     # Вторая кука рождается, пока человек ещё ходит: тем же затухающим
     # профилем, что и возвраты, — обычно через дни, изредка через месяцы.
     # Фиксированного зазора нет, иначе пары в данных узнавались бы по нему.
     birth_day[people:] += 1 + pick(rng, _RETURN_DELAY_CUMULATIVE, paired.size)
 
+    # Вторая кука принадлежит покупателю — как и первая кука его пары.
+    buyer_cookie = np.concatenate((buyer, np.ones(paired.size, dtype=bool)))
     active_cookie, active_day = _active_days(
-        rng, birth_day, day + world.RETURN_TAIL_DAYS
+        rng, birth_day, buyer_cookie, day + world.RETURN_TAIL_DAYS
     )
     twins = np.column_stack((paired, np.arange(people, cookies, dtype=np.int64)))
     pair_cookies, pair_order_days = _assign_orders(
@@ -204,8 +207,7 @@ def cohort(seed: int, day: int) -> Cohort:
         people=people,
         client_id=client_id,
         birth_day=birth_day,
-        # Вторая кука принадлежит покупателю — как и первая кука его пары.
-        buyer=np.concatenate((buyer, np.ones(paired.size, dtype=bool))),
+        buyer=buyer_cookie,
         active_cookie=active_cookie,
         active_day=active_day,
         pair_cookies=pair_cookies,
@@ -271,13 +273,30 @@ def _influx(rng: np.random.Generator, day: int) -> int:
 
 
 def _active_days(
-    rng: np.random.Generator, birth_day: NDArray[np.int64], window_end: int
+    rng: np.random.Generator,
+    birth_day: NDArray[np.int64],
+    buyer: NDArray[np.bool_],
+    window_end: int,
 ) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    """Дни активности каждой куки: день рождения и возвраты, пока окно открыто."""
+    """Дни активности каждой куки: день рождения и возвраты, пока окно открыто.
+
+    Помеченный планом покупатель живёт дольше прочих: одноразовым бывает
+    много реже и возвращается чаще. Это первый из двух рычагов метки
+    (второй — воронка дня): метки в событии нет, поэтому «постоянный
+    покупатель» читается в данных только как кука, которая ходит неделями и
+    покупает не раз. Одним лифтом конверсии этого не добиться — кука живёт
+    меньше двух визитов за снимок, и второй покупке негде случиться (спека
+    генератора, раздел 9).
+    """
     cookies = birth_day.size
     returns = np.zeros(cookies, dtype=np.int64)
-    returning = rng.integers(0, 100, cookies) >= world.ONE_SHOT_PERCENT
-    returns[returning] = 1 + pick(rng, _RETURN_COUNT_CUMULATIVE, int(returning.sum()))
+    one_shot = np.where(buyer, world.BUYER_ONE_SHOT_PERCENT, world.ONE_SHOT_PERCENT)
+    returning = rng.integers(0, 100, cookies) >= one_shot
+    for here, weights in (
+        (returning & ~buyer, _RETURN_COUNT_CUMULATIVE),
+        (returning & buyer, _BUYER_RETURN_COUNT_CUMULATIVE),
+    ):
+        returns[here] = 1 + pick(rng, weights, int(here.sum()))
 
     owner = np.repeat(np.arange(cookies, dtype=np.int64), returns)
     delay = 1 + pick(rng, _RETURN_DELAY_CUMULATIVE, owner.size)

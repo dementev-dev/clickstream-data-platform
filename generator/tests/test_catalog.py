@@ -54,6 +54,18 @@ def test_every_row_is_filled_and_priced_in_whole_kopecks():
         assert low <= int(row["price"]) <= high, row["sku"]
 
 
+def test_part_of_the_prices_carry_kopecks():
+    """Без копеек урок про Float64 беспредметен: округлять было бы нечего.
+
+    Сторожится не доля, а то, на чём стоит урок: цены бывают и кратные
+    рублю, и с копейками — тогда `productPrice` округляется форматом, а
+    `purchaseRevenue` несёт точную сумму.
+    """
+    kopecks = [int(row["price"]) % 100 for row in rows()]
+    assert any(rest for rest in kopecks)
+    assert any(not rest for rest in kopecks)
+
+
 def test_every_category_of_the_assortment_is_covered():
     """Каталог покрывает ассортимент целиком: пустых категорий не бывает."""
     present = {row["category"] for row in rows()}
