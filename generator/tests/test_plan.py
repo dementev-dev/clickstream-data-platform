@@ -141,7 +141,7 @@ def test_every_pair_orders_from_both_cookies_on_the_axis(day: int):
     for cookies, days in zip(
         cohort.pair_cookies.tolist(), cohort.pair_order_days.tolist(), strict=True
     ):
-        assert len(set(days)) == len(days) or cookies[0] != cookies[1]
+        assert cookies[0] != cookies[1], "заказы пары — с двух разных кук"
         for cookie, order_day in zip(cookies, days, strict=True):
             assert order_day >= 0
             assert (cookie, order_day) in visits
@@ -168,8 +168,8 @@ def test_the_influx_breathes_with_the_week():
     counters = plan.counters(CANONICAL_SEED, SNAPSHOT_DAYS)
     weekdays = [size for day, size in enumerate(counters.new_cookies) if day % 7 < 5]
     weekend = [size for day, size in enumerate(counters.new_cookies) if day % 7 >= 5]
-    expected = mean(world.WEEKLY_INFLUX_PERCENT[5:]) / mean(
-        world.WEEKLY_INFLUX_PERCENT[:5]
+    expected = mean(world.WEEKLY_PROFILE_PERCENT[5:]) / mean(
+        world.WEEKLY_PROFILE_PERCENT[:5]
     )
     assert abs(mean(weekend) / mean(weekdays) - expected) < 0.03
 

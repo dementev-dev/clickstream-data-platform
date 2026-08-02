@@ -25,6 +25,22 @@ def test_canonical_seed_is_a_repository_constant():
     assert isinstance(CANONICAL_SEED, int)
 
 
+def test_addressing_a_subtree_equals_spawning_down_to_it():
+    """Свойство numpy, на котором стоит вся раздача зерна.
+
+    Потомок определяется парой (зерно, позиция в дереве): выписанный руками
+    `spawn_key` даёт тот же подпоток, что цепочка `spawn`. Иначе результат
+    зависел бы от порядка вычислений, и «параллельно равно последовательно»
+    не выполнялось бы.
+    """
+    chained = np.random.SeedSequence(CANONICAL_SEED).spawn(1)[0].spawn(4)[3]
+    addressed = np.random.SeedSequence(CANONICAL_SEED, spawn_key=(0, 3))
+    assert chained.spawn_key == addressed.spawn_key
+    assert first_draws(np.random.Generator(np.random.PCG64(chained))) == first_draws(
+        np.random.Generator(np.random.PCG64(addressed))
+    )
+
+
 def test_stream_is_a_position_in_the_tree_not_an_order_of_calls():
     straight = first_draws(cohort_stream(CANONICAL_SEED, 5))
     cohort_stream(CANONICAL_SEED, 0)

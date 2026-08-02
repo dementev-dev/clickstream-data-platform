@@ -30,13 +30,13 @@ from clickstream_generator import world
 from clickstream_generator.seeds import cohort_stream
 
 # Куки живут числами ниже 2^53: выше JSON округляет — тот же довод, что у
-# `WatchID` в контракте схемы.
-MAX_CLIENT_ID = 2**53
+# `WatchID` в контракте схемы. Граница не достигается: 2^53 сам уже за ней.
+CLIENT_ID_LIMIT = 2**53
 
 # Кумулятивные веса: выбор по ним — целочисленный, бросок попадает в чью-то
 # долю общего веса.
-_RETURN_COUNTS = np.cumsum(world.RETURN_COUNT_WEIGHTS)
-_RETURN_DELAYS = np.cumsum(world.RETURN_DELAY_WEIGHTS)
+_RETURN_COUNT_CUMULATIVE = np.cumsum(world.RETURN_COUNT_WEIGHTS)
+_RETURN_DELAY_CUMULATIVE = np.cumsum(world.RETURN_DELAY_WEIGHTS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +74,18 @@ class Cohort:
     def pairs(self) -> int:
         """Сколько пар получили назначенные заказы."""
         return len(self.pair_cookies)
+
+    def visitors_on(
+        self, day: int
+    ) -> tuple[NDArray[np.uint64], NDArray[np.bool_], NDArray[np.bool_]]:
+        """Кто из когорты пришёл в день `day`: куки, покупатели, заказы пар.
+
+        Как визиты и пары уложены в массивы, знает только когорта: снаружи
+        спрашивают день и получают три ряда одной длины.
+        """
+        here = self.visit_cookie[self.visit_day == day]
+        ordering = self.pair_cookies[self.pair_order_days == day]
+        return self.client_id[here], self.buyer[here], np.isin(here, ordering)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,12 +131,12 @@ def cohort(seed: int, day: int) -> Cohort:
     ]
 
     cookies = people + paired.size
-    client_id = rng.integers(1, MAX_CLIENT_ID, cookies, dtype=np.uint64)
+    client_id = rng.integers(1, CLIENT_ID_LIMIT, cookies, dtype=np.uint64)
     birth_day = np.full(cookies, day, dtype=np.int64)
     # Вторая кука рождается, пока человек ещё ходит: тем же затухающим
     # профилем, что и возвраты, — обычно через дни, изредка через месяцы.
     # Фиксированного зазора нет, иначе пары в данных узнавались бы по нему.
-    birth_day[people:] += 1 + _pick(rng, _RETURN_DELAYS, paired.size)
+    birth_day[people:] += 1 + _pick(rng, _RETURN_DELAY_CUMULATIVE, paired.size)
 
     visit_cookie, visit_day = _visits(rng, birth_day, day + world.RETURN_TAIL_DAYS)
     pair_cookies, pair_order_days = _assign_orders(
@@ -156,12 +168,10 @@ def audience(seed: int, day: int) -> DayAudience:
     client_id, buyer, assigned = [], [], []
     # Предыстория ровно такой глубины, чтобы окна хватило и первому дню оси.
     for born in range(day - world.RETURN_TAIL_DAYS, day + 1):
-        born_cohort = cohort(seed, born)
-        here = born_cohort.visit_cookie[born_cohort.visit_day == day]
-        client_id.append(born_cohort.client_id[here])
-        buyer.append(born_cohort.buyer[here])
-        ordering = born_cohort.pair_cookies[born_cohort.pair_order_days == day]
-        assigned.append(np.isin(here, ordering))
+        came, bought, ordered = cohort(seed, born).visitors_on(day)
+        client_id.append(came)
+        buyer.append(bought)
+        assigned.append(ordered)
     return DayAudience(
         day=day,
         client_id=np.concatenate(client_id),
@@ -177,7 +187,7 @@ def counters(seed: int, days: int) -> PlanCounters:
     seen: list[NDArray[np.uint64]] = []
     pairs = 0
 
-    # Дальше горизонта когорты не заглядывают, ближе предыстории — не живут.
+    # Ниже — вся предыстория: её когорты ещё возвращаются в горизонт.
     for born in range(-world.RETURN_TAIL_DAYS, days):
         born_cohort = cohort(seed, born)
         inside = (born_cohort.visit_day >= 0) & (born_cohort.visit_day < days)
@@ -200,7 +210,7 @@ def counters(seed: int, days: int) -> PlanCounters:
 
 def _influx(rng: np.random.Generator, day: int) -> int:
     """Сколько новых людей приходит в этот день: число мира по недельной волне."""
-    base = world.DAILY_INFLUX * world.WEEKLY_INFLUX_PERCENT[day % 7] // 100
+    base = world.DAILY_INFLUX * world.WEEKLY_PROFILE_PERCENT[day % 7] // 100
     spread = base * world.INFLUX_JITTER_PERCENT // 100
     return base + int(rng.integers(-spread, spread + 1))
 
@@ -212,10 +222,10 @@ def _visits(
     cookies = birth_day.size
     returns = np.zeros(cookies, dtype=np.int64)
     returning = rng.integers(0, 100, cookies) >= world.ONE_SHOT_PERCENT
-    returns[returning] = 1 + _pick(rng, _RETURN_COUNTS, int(returning.sum()))
+    returns[returning] = 1 + _pick(rng, _RETURN_COUNT_CUMULATIVE, int(returning.sum()))
 
     owner = np.repeat(np.arange(cookies, dtype=np.int64), returns)
-    delay = 1 + _pick(rng, _RETURN_DELAYS, owner.size)
+    delay = 1 + _pick(rng, _RETURN_DELAY_CUMULATIVE, owner.size)
     cookie = np.concatenate((np.arange(cookies, dtype=np.int64), owner))
     when = np.concatenate((birth_day, birth_day[owner] + delay))
 
@@ -226,9 +236,9 @@ def _visits(
     cookie, when = cookie[order], when[order]
 
     # Два возврата в один день — один визит: день у куки бывает только один.
-    once = np.ones(cookie.size, dtype=bool)
-    once[1:] = (cookie[1:] != cookie[:-1]) | (when[1:] != when[:-1])
-    return cookie[once], when[once]
+    first_of_day = np.ones(cookie.size, dtype=bool)
+    first_of_day[1:] = (cookie[1:] != cookie[:-1]) | (when[1:] != when[:-1])
+    return cookie[first_of_day], when[first_of_day]
 
 
 def _assign_orders(
@@ -247,8 +257,9 @@ def _assign_orders(
     """
     on_axis = visit_day >= 0
     counts = np.bincount(visit_cookie[on_axis], minlength=cookies)
-    # Визиты куки идут подряд и по возрастанию дня, поэтому дни от D0 — хвост
-    # её блока: до конца блока ровно `counts` визитов.
+    # Визиты отсортированы по куке, а внутри куки — по дню, и дни от D0 идут
+    # последними. Значит, дни на оси у куки — хвост её блока: от конца блока
+    # назад ровно `counts` визитов.
     first_on_axis = np.searchsorted(visit_cookie, np.arange(cookies), "right") - counts
 
     assigned = np.all(counts[pair_cookies] > 0, axis=1)

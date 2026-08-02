@@ -21,8 +21,8 @@ def test_origin_is_a_monday():
 
 
 def test_weekly_profile_covers_a_week_and_averages_to_one():
-    assert len(world.WEEKLY_INFLUX_PERCENT) == 7
-    assert sum(world.WEEKLY_INFLUX_PERCENT) == 700
+    assert len(world.WEEKLY_PROFILE_PERCENT) == 7
+    assert sum(world.WEEKLY_PROFILE_PERCENT) == 700
 
 
 def test_returning_share_matches_the_spec():
