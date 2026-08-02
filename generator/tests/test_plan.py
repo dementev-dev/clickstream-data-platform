@@ -56,6 +56,15 @@ def test_counters_are_a_pure_function_of_the_seed():
     assert first == plan.counters(CANONICAL_SEED, SNAPSHOT_DAYS)
 
 
+def test_a_remembered_cohort_cannot_be_spoiled_from_outside():
+    """Когорту помнят и раздают всем дням окна: править её нельзя никак."""
+    cohort = plan.cohort(CANONICAL_SEED, 0)
+    with pytest.raises(ValueError):
+        cohort.client_id[0] = 42
+    with pytest.raises(ValueError):
+        cohort.client_id.flags.writeable = True
+
+
 def test_another_seed_is_another_world():
     ours = plan.cohort(CANONICAL_SEED, 3)
     theirs = plan.cohort(CANONICAL_SEED + 1, 3)
