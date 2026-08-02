@@ -100,7 +100,9 @@ COLUMNS: tuple[Column, ...] = (
         numpy_dtype="datetime64[D]",
         normalized_name="event_date",
         group=ColumnGroup.IDENTIFIERS,
-        comment="дата события; по ней режется партиция",
+        comment="дата события в часовом поясе счётчика; по ней режется"
+        " партиция. Дату из `UTCEventTime` не выводить: у ночных событий"
+        " она на сутки другая",
     ),
     Column(
         name="UTCEventTime",
@@ -108,7 +110,9 @@ COLUMNS: tuple[Column, ...] = (
         numpy_dtype="datetime64[s]",
         normalized_name="utc_event_time",
         group=ColumnGroup.IDENTIFIERS,
-        comment="время события в UTC — единственная метка времени, как у Метрики",
+        comment="время события в UTC — единственная метка времени, как у"
+        " Метрики; сутки же считаются в поясе счётчика, поэтому"
+        " `toDate(UTCEventTime)` ≠ `EventDate`",
     ),
     Column(
         name="ClientTimeZone",
