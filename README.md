@@ -27,7 +27,7 @@ Prometheus, Grafana и общая база Postgres для метаданных.
 `grep`, `sed`, `tail`, `sleep` и `timeout`. По умолчанию должны быть свободны
 порты `23000`, `28080`, `28088`, `28123`, `28124`, `29000`, `29001`, `29090`
 и `29092`. Проверкам без стенда — `make config-test`, `make lint`,
-`make test` — и сборке документации `make docs` нужен `uv`.
+`make typecheck`, `make test` — и сборке документации `make docs` нужен `uv`.
 
 Стенд запускается без `.env`:
 
