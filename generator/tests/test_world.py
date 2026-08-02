@@ -6,13 +6,20 @@
 «в среднем 3–4 возврата» и «средняя кука активна ≈1,9 дня».
 """
 
-from clickstream_generator import world
+from clickstream_generator import catalog, world
 
 
 def mean_by_weights(values: tuple[int, ...], weights: tuple[int, ...]) -> float:
     pairs = zip(values, weights, strict=True)
     weighted = sum(value * weight for value, weight in pairs)
     return weighted / sum(weights)
+
+
+def active_days(one_shot_percent: int, return_weights: tuple[int, ...]) -> float:
+    """Сколько дней в среднем ходит кука: день рождения плюс возвраты."""
+    counts = tuple(range(1, len(return_weights) + 1))
+    returns = mean_by_weights(counts, return_weights)
+    return 1 + (100 - one_shot_percent) / 100 * returns
 
 
 def test_origin_is_a_monday():
@@ -36,10 +43,7 @@ def test_returns_average_three_to_four():
 
 def test_average_cookie_is_active_about_two_days():
     """Сходимость с разделом 5: ≈1,9 активного дня на куку — отсюда 6–8 тыс."""
-    counts = tuple(range(1, len(world.RETURN_COUNT_WEIGHTS) + 1))
-    returns = mean_by_weights(counts, world.RETURN_COUNT_WEIGHTS)
-    active_days = 1 + (100 - world.ONE_SHOT_PERCENT) / 100 * returns
-    assert 1.8 <= active_days <= 2.0
+    assert 1.8 <= active_days(world.ONE_SHOT_PERCENT, world.RETURN_COUNT_WEIGHTS) <= 2.0
 
 
 def test_return_delays_cover_the_whole_activity_window():
@@ -108,12 +112,67 @@ def test_pauses_stay_inside_the_visit_timeout():
     assert max(world.LONG_PAUSE_SECONDS) < world.VISIT_TIMEOUT_SECONDS
 
 
-def test_the_funnel_converts_about_two_percent_of_visits():
-    """Конверсия ~2% на сессию (спека, раздел 9) — произведение трёх шагов."""
-    conversion = (
-        world.CART_PERCENT
-        * world.CHECKOUT_OF_CART_PERCENT
-        * world.CONFIRMATION_OF_CHECKOUT_PERCENT
-        / 100**2
-    )
-    assert 1.5 <= conversion <= 2.5
+def test_the_trade_event_never_overtakes_the_next_page():
+    """Торговое событие отстаёт от своей страницы меньше, чем длится пауза.
+
+    На этом стоят два свойства сразу: событие корзины не обгоняет страницу,
+    на которой посетитель нажал кнопку, и не выходит за полночь — за ним в
+    том же визите всегда идёт страница, которая полночь пережила.
+    """
+    assert max(world.TRADE_DELAY_SECONDS) <= min(world.PAGE_PAUSE_SECONDS)
+
+
+def conversion(cart: int, checkout_of_cart: int) -> float:
+    """Конверсия визита в заказ, проценты: произведение трёх шагов воронки."""
+    return cart * checkout_of_cart * world.CONFIRMATION_OF_CHECKOUT_PERCENT / 100**2
+
+
+def test_the_ordinary_visitor_converts_a_bit_below_the_world():
+    """Воронка обычного посетителя: ~1,5% визитов в оформленный заказ.
+
+    До ~2% конверсию мира (спека, раздел 9) добирают помеченные покупатели
+    и обещанные планом заказы пар, поэтому здесь сторожится слагаемое, а не
+    итог: сам итог меряет день-функция на собранном дне
+    (`test_the_shop_stays_the_same_plausible_shop`).
+    """
+    assert 1.2 <= conversion(world.CART_PERCENT, world.CHECKOUT_OF_CART_PERCENT) <= 1.8
+
+
+def test_the_buyer_mark_shows_on_both_steps_of_the_funnel():
+    """Один шаг дал бы половину картины: кладут реже и бросают чаще оба."""
+    assert world.BUYER_CART_PERCENT > world.CART_PERCENT
+    assert world.BUYER_CHECKOUT_OF_CART_PERCENT > world.CHECKOUT_OF_CART_PERCENT
+    lift = conversion(
+        world.BUYER_CART_PERCENT, world.BUYER_CHECKOUT_OF_CART_PERCENT
+    ) / conversion(world.CART_PERCENT, world.CHECKOUT_OF_CART_PERCENT)
+    # Заметно чаще прочих, но не «покупают только помеченные»: 5% людей дали
+    # бы тогда около 40 заказов в день вместо 240 (спека, раздел 9).
+    assert 2 <= lift <= 6
+
+
+def test_the_demand_levels_keep_their_order_and_yield_to_the_intent():
+    """Ряды вероятностей читаются по уровням каталога, и оба убывают.
+
+    Совпадение длин — не формальность: ряды индексируются номером уровня,
+    и новый уровень в файле каталога обязан получить здесь своё число.
+    """
+    rows = (world.SHOPPING_ADD_PERCENT, world.BROWSING_ADD_PERCENT)
+    for row in rows:
+        assert len(row) == len(catalog.DEMAND_LEVELS)
+        assert row[0] > row[1] > row[2], row
+    # Намерение сильнее товара: визит, пришедший покупать, кладёт чаще на
+    # любом уровне — иначе слово «намерение» ничего бы не значило.
+    assert all(shopping > browsing for shopping, browsing in zip(*rows, strict=True))
+    # Но и не всё подряд: товар решает у обоих, спрос не декорация.
+    assert min(world.SHOPPING_ADD_PERCENT) < 100
+
+
+def test_the_buyer_mark_makes_the_cookie_live_longer():
+    """Второй рычаг метки: без долгой жизни второй покупке негде случиться."""
+    assert world.BUYER_ONE_SHOT_PERCENT < world.ONE_SHOT_PERCENT
+    usual = active_days(world.ONE_SHOT_PERCENT, world.RETURN_COUNT_WEIGHTS)
+    buyer = active_days(world.BUYER_ONE_SHOT_PERCENT, world.BUYER_RETURN_COUNT_WEIGHTS)
+    assert buyer > 2 * usual
+    # Но не бессмертие: дневная аудитория остаётся в вилке 6–8 тыс., а
+    # помеченных всего 5% людей когорты.
+    assert buyer < world.RETURN_TAIL_DAYS / 10

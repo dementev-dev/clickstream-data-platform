@@ -10,12 +10,22 @@
 раз в неделю, корзина в двадцать позиций.
 
 Что решено формой файла, а не его длиной: колонки `sku,name,category,brand,
-price`; артикул — четыре латинские буквы категории, дефис и четыре цифры;
-цена — целые копейки (деньги генератор считает целыми, спека, раздел 2).
+price,demand`; артикул — четыре латинские буквы категории, дефис и четыре
+цифры; цена — целые копейки (деньги генератор считает целыми, спека,
+раздел 2). Часть цен кратна рублю, часть несёт копейки — как в обычной
+рознице (1 289,90 ₽). Без копеек урок про Float64 был бы беспредметным:
+округлять нечего, и разрыв между `productPrice` и `purchaseRevenue`
+пришлось бы выдумывать (спека генератора, раздел 9).
 Строк в файле может быть сколько угодно: ни генератор, ни тесты их не
 считают, а товар для карточки выбирается равномерно внутри категории.
-Популярность товаров не моделируется — придумывать вес каждой строке
-пришлось бы вручную, а каталог растёт механически.
+
+**Уровень спроса** — привлекательность товара, а не частота его показа:
+карточку любого товара открывают одинаково часто, но магнит из открытой
+карточки уходит в корзину чаще, чем залежавшийся. Уровень приписан строке
+в файле — он постоянная часть мира, а не бросок дня, — и приписан россыпью:
+ни с ценой, ни с категорией он не связан. Связь с ценой была бы жёсткой, и
+менти нашёл бы в данных ровно то, что мы в них вложили (спека генератора,
+раздел 9). Сами вероятности живут в числах мира, здесь только имена уровней.
 """
 
 import csv
@@ -30,7 +40,11 @@ from numpy.typing import NDArray
 # Каталог не настраивается извне — он часть мира, а не запуска.
 CATALOG_PATH = Path(__file__).resolve().parents[3] / "data" / "catalog" / "products.csv"
 
-COLUMNS = ("sku", "name", "category", "brand", "price")
+COLUMNS = ("sku", "name", "category", "brand", "price", "demand")
+
+# Уровни спроса по убыванию желанности: порядок здесь — порядок чисел мира,
+# которыми уровень превращается в вероятность (`world.SHOPPING_ADD_PERCENT`).
+DEMAND_LEVELS = ("магнит", "обычный", "залёживается")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +80,7 @@ class Catalog:
     category: NDArray[np.int64]
     brand: NDArray[np.object_]
     price: NDArray[np.int64]
+    demand: NDArray[np.int64]
     grouped: NDArray[np.int64]
     first: NDArray[np.int64]
     count: NDArray[np.int64]
@@ -81,12 +96,14 @@ def catalog() -> Catalog:
     category = np.array([index[row["category"]] for row in rows], dtype=np.int64)
     grouped = np.argsort(category, kind="stable")
     count = np.bincount(category, minlength=len(CATEGORIES))
+    level = {name: number for number, name in enumerate(DEMAND_LEVELS)}
     return Catalog(
         sku=np.array([row["sku"] for row in rows], dtype=object),
         name=np.array([row["name"] for row in rows], dtype=object),
         category=category,
         brand=np.array([row["brand"] for row in rows], dtype=object),
         price=np.array([int(row["price"]) for row in rows], dtype=np.int64),
+        demand=np.array([level[row["demand"]] for row in rows], dtype=np.int64),
         grouped=grouped,
         first=np.concatenate(([0], np.cumsum(count)[:-1])),
         count=count,

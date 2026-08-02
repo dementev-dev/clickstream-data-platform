@@ -1,9 +1,10 @@
 """День-функция: (зерно, D) → упорядоченный поток событий модельных суток.
 
 Здесь трафиковая половина мира: визиты, страницы, атрибуция, устройство и
-гео. Торговые события (#40) сядут на этот же поток и добавят к нему свои
-строки; их колонки в pageview присутствуют, но пусты по смыслу — «пусто»
-всегда пустой массив, пустая строка или 0, а не отсутствие ключа.
+гео. Торговые события садятся на этот же поток и добавляют к нему свои
+строки — их собирает `commerce` и им же поток заканчивается. У просмотра
+страницы торговые колонки присутствуют, но пусты по смыслу: «пусто» — всегда
+пустой массив, пустая строка или 0, а не отсутствие ключа.
 
 День — чистая функция зерна и номера дня: одна и та же пара даёт те же
 события, а день N+1 не трогает дни 1…N. Держится это на подпотоке
@@ -25,23 +26,25 @@
 
 1. Визит принадлежит одной куке: склейка `ClientID` визитом не считается.
 2. Пауза дольше 30 минут рвёт визит надвое, поэтому паузы внутри визита
-   всегда короче таймаута, а соседние визиты куки разведены дальше него.
+   всегда короче таймаута, а соседние визиты куки разведены дальше него —
+   считая от последнего события визита, которым бывает покупка, а не от
+   последней его страницы.
 3. Граница модельных суток режет визит: события за полночь в дне не живут.
    Исключение одно — визит с заказом, обещанным планом двухкуковых пар: его
-   старт сдвигается назад, чтобы воронка уместилась в сутки. Это принятое
-   ограничение модели: обещание плана — гарантия, ради неё мы сужаем свободу
-   старта. Цена названа — около 24 визитов в день из ~9,5 тыс. не начинаются
-   в последние минуты суток.
+   старт сдвигается назад, чтобы воронка уместилась в сутки вместе с
+   торговым хвостом. Это принятое ограничение модели: обещание плана —
+   гарантия, ради неё мы сужаем свободу старта. Цена названа — около 24
+   визитов в день из ~9,5 тыс. не начинаются в последние минуты суток.
 
-**Шов для торговых событий (#40).** `Day` отдаёт, кроме колонок, два
-выровненных по строкам ряда: `page` — какая это страница магазина, и
-`product` — какой товар показывала карточка (−1 у прочих страниц). По ним
-#40 узнаёт и то, куда вешать событие (корзина, оформление, подтверждение),
-и то, что посетитель на самом деле смотрел: товар в корзине, которого никто
-не открывал, — видимая глупость в воронке. Визит с назначенным заказом
-всегда доходит до `/confirmation`, а перед корзиной у него всегда есть
-карточка товара. Своей случайности #40 не занимает: подпоток `COMMERCE`
-нетронут.
+**Шов с торговыми событиями.** Поток несёт, кроме колонок, два выровненных
+по строкам ряда: `page` — какая это страница магазина, и `product` — какой
+товар показывала карточка (−1 у прочих страниц). По ним `commerce` знает и
+то, куда сажать событие (карточка, подтверждение), и то, что посетитель на
+самом деле смотрел: товар в корзине, которого никто не открывал, — видимая
+глупость в воронке. Визит с назначенным заказом всегда доходит до
+`/confirmation`, а перед корзиной у него всегда есть карточка товара.
+Случайность у половин разная: трафик берёт подпоток `TRAFFIC`, торговля —
+`COMMERCE`, и правка одной не сдвигает другую.
 """
 
 from dataclasses import dataclass
@@ -50,20 +53,23 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from clickstream_generator import catalog, plan, reference, world
+from clickstream_generator import catalog, commerce, ids, plan, reference, world
 from clickstream_generator.reference import Page
 from clickstream_generator.seeds import Component, day_stream
 from clickstream_generator.weights import pick, pick_row
 
 DAY_SECONDS = 24 * 60 * 60
 
-# Потолок идентификаторов тот же, что у кук: выше 2^53 числа в JSON
-# округляются (контракт схемы, `WatchID`).
-ID_LIMIT = plan.CLIENT_ID_LIMIT
-
 # Карточка перед корзиной обязательна: положить в корзину то, чего не
 # открывал, посетитель не может.
 MIN_PAGES_BEFORE_CART = 2
+
+# На столько секунд визит длиннее своих страниц: торговое событие встаёт
+# позже страницы, на которую село, и последним событием визита бывает
+# покупка, а не просмотр подтверждения. Величина нужна здесь дважды — визит
+# с обещанным заказом обязан уместиться в сутки вместе с хвостом, а соседние
+# визиты куки разводятся дальше таймаута тоже от хвоста, а не от страницы.
+TRADE_TAIL_SECONDS = world.TRADE_DELAY_SECONDS[1]
 
 _VISIT_COUNT_CUMULATIVE = np.cumsum(world.VISITS_PER_ACTIVE_DAY_WEIGHTS)
 _VISIT_PAGES_CUMULATIVE = np.cumsum(world.VISIT_PAGES_WEIGHTS)
@@ -72,7 +78,7 @@ _SOURCE_CUMULATIVE = np.cumsum([source.weight for source in reference.TRAFFIC_SO
 
 @dataclass(frozen=True, slots=True)
 class Day:
-    """Поток событий одного дня: колонки выгрузки и шов для торговых событий.
+    """Поток событий одного дня: колонки выгрузки и страницы за ними.
 
     Строки упорядочены по времени — так их и проиграет проигрыватель.
     `columns` — колонки контракта схемы по его порядку, все до одной;
@@ -124,9 +130,15 @@ def stream(seed: int, day: int) -> Day:
 
     second = np.repeat(start, visits.pages) + elapsed
     # Граница суток режет визит: хвост за полночью в этот день не попадает.
-    alive = second < DAY_SECONDS
-    visit_id = np.repeat(_unique_ids(rng, len(visits)), visits.pages)
-    watch_id = _unique_ids(rng, int(alive.sum()))
+    # Странице подтверждения нужно место и под её покупку: подтверждение без
+    # покупки было бы потерей на клиентской стороне, а она здесь честная —
+    # потери и дубли стенд заводит намеренно и позже (этапы 4 и 6). Поэтому
+    # полночь забирает подтверждение вместе с торговым хвостом или не
+    # забирает ни того, ни другого.
+    room = np.where(page == Page.CONFIRMATION, TRADE_TAIL_SECONDS, 0)
+    alive = second + room < DAY_SECONDS
+    visit_id = np.repeat(ids.unique(rng, len(visits)), visits.pages)
+    watch_id = ids.unique(rng, int(alive.sum()))
 
     rest = _columns(rng, day, audience, visits, page, product, second)
     columns = {
@@ -136,12 +148,16 @@ def stream(seed: int, day: int) -> Day:
     }
 
     order = np.lexsort((columns["WatchID"], columns["UTCEventTime"]))
-    return Day(
-        day=day,
-        columns={name: value[order] for name, value in columns.items()},
-        page=page[alive][order],
-        product=product[alive][order],
+    # Торговые события садятся на готовый трафиковый поток и отдают его
+    # целиком: в нём же они и упорядочиваются.
+    columns, page, product = commerce.weave(
+        seed,
+        day,
+        {name: value[order] for name, value in columns.items()},
+        page[alive][order],
+        product[alive][order],
     )
+    return Day(day=day, columns=columns, page=page, product=product)
 
 
 def _visits(rng: np.random.Generator, audience: plan.DayAudience) -> _Visits:
@@ -161,7 +177,7 @@ def _visits(rng: np.random.Generator, audience: plan.DayAudience) -> _Visits:
     # Обещанный планом заказ достаётся первому визиту дня: слева от него
     # соседей нет, поэтому двигать его внутри суток можно свободно.
     ordering = audience.assigned_order[cookie] & (ordinal == 0)
-    stage = _funnel(rng, visits, ordering)
+    stage = _funnel(rng, audience.buyer[cookie], ordering)
     # Воронка удлиняет визит, а не съедает его: до корзины надо ещё дойти.
     browse = np.where(
         stage > 0, np.maximum(length - stage, MIN_PAGES_BEFORE_CART), length
@@ -181,17 +197,32 @@ def _visits(rng: np.random.Generator, audience: plan.DayAudience) -> _Visits:
 
 
 def _funnel(
-    rng: np.random.Generator, visits: int, ordering: NDArray[np.bool_]
+    rng: np.random.Generator,
+    buyer: NDArray[np.bool_],
+    ordering: NDArray[np.bool_],
 ) -> NDArray[np.int64]:
-    """Докуда дошёл визит: 0 — до корзины не дошёл, 3 — до подтверждения."""
-    draw = rng.integers(0, 100, (3, visits))
-    cart = draw[0] < world.CART_PERCENT
-    checkout = cart & (draw[1] < world.CHECKOUT_OF_CART_PERCENT)
+    """Докуда дошёл визит: 0 — до корзины не дошёл, 3 — до подтверждения.
+
+    Помеченный планом покупатель отличается на обоих шагах: и до корзины
+    доходит чаще, и бросает её реже. Склонность покупать — свойство
+    человека, а не визита, поэтому одинаковый для всех бросок оставил бы
+    метку плана словом без следа в данных (спека генератора, раздел 9).
+    """
+    draw = rng.integers(0, 100, (3, buyer.size))
+    cart = draw[0] < np.where(buyer, world.BUYER_CART_PERCENT, world.CART_PERCENT)
+    checkout = cart & (
+        draw[1]
+        < np.where(
+            buyer,
+            world.BUYER_CHECKOUT_OF_CART_PERCENT,
+            world.CHECKOUT_OF_CART_PERCENT,
+        )
+    )
     confirmation = checkout & (draw[2] < world.CONFIRMATION_OF_CHECKOUT_PERCENT)
 
     stage = cart.astype(np.int64) + checkout + confirmation
     # Заказ, обещанный планом, воронку проходит целиком: гарантия пар стоит
-    # на том, что событие покупки в этот день случится (#40 его и повесит).
+    # на том, что событие покупки в этот день случится: его повесит `commerce`.
     stage[ordering] = len(reference.FUNNEL_PAGES)
     return stage
 
@@ -219,7 +250,7 @@ def _walk(
             page[row] = table[step[row]]
         stage = int(visits.stage[visit])
         if stage:
-            # В корзину — только с карточки: иначе #40 положит туда товар,
+            # В корзину — только с карточки: иначе в ней окажется товар,
             # которого посетитель не открывал.
             page[begin + browsed - 1] = Page.PRODUCT
             page[begin + browsed : begin + browsed + stage] = funnel[:stage]
@@ -227,8 +258,9 @@ def _walk(
     goods = catalog.catalog()
     shown = page == Page.PRODUCT
     row_category = np.repeat(visits.category, visits.pages)[shown]
-    # Товар — равномерно внутри категории визита: популярность строк не
-    # моделируется, каталог дорастает механически (см. `catalog`).
+    # Товар — равномерно внутри категории визита: карточки всех товаров
+    # открывают одинаково часто, а различает их уровень спроса — уже в
+    # корзине, а не в показе (см. `catalog`).
     inside = rng.integers(0, goods.count[row_category])
     product = np.full(total, -1, dtype=np.int64)
     product[shown] = goods.grouped[goods.first[row_category] + inside]
@@ -266,19 +298,28 @@ def _starts(
     """
     hour = pick_row(rng, _hour_cumulative(day), audience.city[visits.cookie])
     start = hour * 3600 + rng.integers(0, 3600, hour.size)
-    # Визит с обещанным заказом обязан уместиться в сутки целиком.
-    fits = np.minimum(start, DAY_SECONDS - duration - 1)
+    # Визит с обещанным заказом обязан уместиться в сутки целиком — вместе с
+    # торговым хвостом: событие покупки встаёт на секунды позже страницы
+    # подтверждения, и зажимать его к последней секунде значило бы ломать
+    # правило ровно там, ради чего оно написано.
+    fits = np.minimum(start, DAY_SECONDS - duration - TRADE_TAIL_SECONDS - 1)
     start = np.where(visits.ordering, fits, start)
 
     # Визиты куки идут по возрастанию времени и разведены дальше таймаута —
     # иначе лаба склеила бы два визита в один и разошлась бы с `VisitID`.
+    # Разводятся они от последнего события визита, а им бывает покупка:
+    # считать от последней страницы значило бы отдать таймауту торговый хвост.
     start = start[np.lexsort((start, visits.cookie))]
     for repeat in range(1, len(world.VISITS_PER_ACTIVE_DAY_WEIGHTS)):
         later = np.flatnonzero(visits.ordinal == repeat)
         earlier = later - 1
         start[later] = np.maximum(
             start[later],
-            start[earlier] + duration[earlier] + world.VISIT_TIMEOUT_SECONDS + 1,
+            start[earlier]
+            + duration[earlier]
+            + TRADE_TAIL_SECONDS
+            + world.VISIT_TIMEOUT_SECONDS
+            + 1,
         )
     return start
 
@@ -370,7 +411,8 @@ def _columns(
         "RegionCity": by_city("name"),
         "RegionCountryID": np.full(total, reference.COUNTRY_REGION_ID, dtype=np.uint32),
         "RegionCityID": by_city("region_id", np.uint32),
-        # Цели дублируют торговые события, поэтому их ставит #40.
+        # Цели дублируют торговые события, поэтому их ставит `commerce`:
+        # у просмотра страницы достигнутых целей нет.
         "GoalsReached": _blank(total, "uint32"),
         # Своих параметров сайт стенда пока не шлёт: вариант A/B-теста был бы
         # постоянной куки, а не поведением дня. Решение отложено, не забыто:
@@ -447,21 +489,6 @@ def _ip_addresses(
         ],
         dtype=object,
     )
-
-
-def _unique_ids(rng: np.random.Generator, size: int) -> NDArray[np.uint64]:
-    """Неповторяющиеся id ниже 2^53, разбросанные по диапазону.
-
-    Уникальность обещана не для красоты: `WatchID` — ключ дедупликации при
-    переигровке дня (спека генератора, раздел 4), и два одинаковых id
-    склеили бы разные события. Поэтому не броски наугад, а шаги случайной
-    длины — они не повторяются по построению, — и потом перемешивание, чтобы
-    номер не выдавал порядок строк. Средний шаг — весь диапазон, делённый на
-    число событий, поэтому в среднем ряд занимает его половину.
-    """
-    step = ID_LIMIT // (size + 1)
-    ids = np.cumsum(rng.integers(1, step + 1, size, dtype=np.uint64))
-    return ids[np.argsort(rng.integers(0, size * size + 1, size), kind="stable")]
 
 
 def _hour_cumulative(day: int) -> NDArray[np.int64]:
