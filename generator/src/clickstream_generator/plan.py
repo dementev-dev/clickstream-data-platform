@@ -12,7 +12,13 @@
 - приток — кто и когда впервые появился, и сколько раз вернётся;
 - двухкуковые пары — какой человек завёл вторую куку и в какие дни
   каждая из двух кук обязана оформить заказ;
+- паспорт куки — устройство и город: они у куки одни и те же во всех её
+  днях, а знает об этом только план (у пары один город на двоих);
 - счётчики — приток по дням, дневная и накопленная аудитория, пары.
+
+Единица дня здесь — день активности куки, а не визит: слово «визит»
+закреплено за сессией и полем `VisitID`, и визитов у куки за день бывает
+несколько. Сколько именно — решает день-функция, плану это безразлично.
 
 Случайность тянется целыми числами: диапазоны и выбор по целым весам.
 Плавающие распределения системной математики не зовутся — они расходятся
@@ -26,8 +32,9 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import NDArray
 
-from clickstream_generator import world
+from clickstream_generator import reference, world
 from clickstream_generator.seeds import cohort_stream
+from clickstream_generator.weights import pick
 
 # Куки живут числами ниже 2^53: выше JSON округляет — тот же довод, что у
 # `WatchID` в контракте схемы. Граница не достигается: 2^53 сам уже за ней.
@@ -37,18 +44,39 @@ CLIENT_ID_LIMIT = 2**53
 # долю общего веса.
 _RETURN_COUNT_CUMULATIVE = np.cumsum(world.RETURN_COUNT_WEIGHTS)
 _RETURN_DELAY_CUMULATIVE = np.cumsum(world.RETURN_DELAY_WEIGHTS)
+_CITY_CUMULATIVE = np.cumsum([city.weight for city in reference.CITIES])
+_DEVICE_CUMULATIVE = np.cumsum(
+    [profile.weight for profile in reference.DEVICE_PROFILES]
+)
+
+# Профили, разложенные надвое — телефоны и всё остальное. Вторая кука пары
+# берётся из другой половины: у человека это второе устройство, а не копия
+# первого. Мастер-спека (раздел 5) называет пару «телефон и ноутбук»; у нас
+# к телефону встаёт десктоп или планшет — вторым устройством бывает и он, а
+# запрет на планшет не дал бы ничего, кроме зауженного справочника.
+_IS_PHONE = np.array(
+    [
+        profile.category == reference.PHONE_CATEGORY
+        for profile in reference.DEVICE_PROFILES
+    ]
+)
+_DEVICE_HALVES = (np.flatnonzero(~_IS_PHONE), np.flatnonzero(_IS_PHONE))
+_DEVICE_HALF_CUMULATIVE = tuple(
+    np.cumsum([reference.DEVICE_PROFILES[number].weight for number in half])
+    for half in _DEVICE_HALVES
+)
 
 
 @dataclass(frozen=True, slots=True)
 class Cohort:
-    """Люди, впервые пришедшие в мир в день `day`, с их куками и визитами.
+    """Люди, впервые пришедшие в мир в день `day`, с их куками и днями.
 
     Куки лежат одним рядом: сначала первые куки людей — по одной на человека,
     индексы 0…`people`−1, — затем вторые куки двухкуковых пар. Кука без пары
     и есть человек целиком.
 
-    Визиты — плоская таблица «кука — день», отсортированная и без повторов:
-    на день у куки приходится не больше одного визита. Все дни лежат в окне
+    Дни активности — плоская таблица «кука — день», отсортированная и без
+    повторов: дважды за день кука не появляется. Все дни лежат в окне
     активности человека: от `day` до `day` + хвост возвратов.
     """
 
@@ -57,11 +85,14 @@ class Cohort:
     client_id: NDArray[np.uint64]
     birth_day: NDArray[np.int64]
     buyer: NDArray[np.bool_]
-    visit_cookie: NDArray[np.int64]
-    visit_day: NDArray[np.int64]
+    active_cookie: NDArray[np.int64]
+    active_day: NDArray[np.int64]
     # Пары и назначенные им заказы — по строке на пару, по колонке на куку.
     pair_cookies: NDArray[np.int64]
     pair_order_days: NDArray[np.int64]
+    # Паспорт куки: номер профиля устройства и номер города в справочниках.
+    device: NDArray[np.int64]
+    city: NDArray[np.int64]
 
     def __post_init__(self) -> None:
         """Когорта запоминается, поэтому массивы отдаются только на чтение.
@@ -87,28 +118,36 @@ class Cohort:
         """Сколько пар получили назначенные заказы."""
         return len(self.pair_cookies)
 
-    def visitors_on(
-        self, day: int
-    ) -> tuple[NDArray[np.uint64], NDArray[np.bool_], NDArray[np.bool_]]:
-        """Кто из когорты пришёл в день `day`: куки, покупатели, заказы пар.
+    def visitors_on(self, day: int) -> DayAudience:
+        """Кто из когорты пришёл в день `day` — её доля дневной аудитории.
 
-        Как визиты и пары уложены в массивы, знает только когорта: снаружи
-        спрашивают день и получают три ряда одной длины.
+        Как дни активности и пары уложены в массивы, знает только когорта:
+        снаружи спрашивают день и получают готовые ряды одной длины.
         """
-        here = self.visit_cookie[self.visit_day == day]
+        here = self.active_cookie[self.active_day == day]
         ordering = self.pair_cookies[self.pair_order_days == day]
-        return self.client_id[here], self.buyer[here], np.isin(here, ordering)
+        return DayAudience(
+            day=day,
+            client_id=self.client_id[here],
+            buyer=self.buyer[here],
+            assigned_order=np.isin(here, ordering),
+            device=self.device[here],
+            city=self.city[here],
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class DayAudience:
-    """Куки, пришедшие в день `day`, — вход для будущей дня-функции."""
+    """Куки, пришедшие в день `day`, — вход дня-функции."""
 
     day: int
     client_id: NDArray[np.uint64]
     buyer: NDArray[np.bool_]
     # Куки, которым план назначил на этот день гарантированный заказ пары.
     assigned_order: NDArray[np.bool_]
+    # Паспорт куки: номера строк в справочниках устройств и городов.
+    device: NDArray[np.int64]
+    city: NDArray[np.int64]
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,16 +187,18 @@ def cohort(seed: int, day: int) -> Cohort:
     # Вторая кука рождается, пока человек ещё ходит: тем же затухающим
     # профилем, что и возвраты, — обычно через дни, изредка через месяцы.
     # Фиксированного зазора нет, иначе пары в данных узнавались бы по нему.
-    birth_day[people:] += 1 + _pick(rng, _RETURN_DELAY_CUMULATIVE, paired.size)
+    birth_day[people:] += 1 + pick(rng, _RETURN_DELAY_CUMULATIVE, paired.size)
 
-    visit_cookie, visit_day = _visits(rng, birth_day, day + world.RETURN_TAIL_DAYS)
-    pair_cookies, pair_order_days = _assign_orders(
-        rng,
-        np.column_stack((paired, np.arange(people, cookies, dtype=np.int64))),
-        visit_cookie,
-        visit_day,
-        cookies,
+    active_cookie, active_day = _active_days(
+        rng, birth_day, day + world.RETURN_TAIL_DAYS
     )
+    twins = np.column_stack((paired, np.arange(people, cookies, dtype=np.int64)))
+    pair_cookies, pair_order_days = _assign_orders(
+        rng, twins, active_cookie, active_day, cookies
+    )
+    # Паспорт бросается последним — после всего, что уже измерено: тогда
+    # счётчики канонического мира от этой добавки не двигаются.
+    device, city = _passports(rng, twins, cookies)
     return Cohort(
         day=day,
         people=people,
@@ -165,10 +206,12 @@ def cohort(seed: int, day: int) -> Cohort:
         birth_day=birth_day,
         # Вторая кука принадлежит покупателю — как и первая кука его пары.
         buyer=np.concatenate((buyer, np.ones(paired.size, dtype=bool))),
-        visit_cookie=visit_cookie,
-        visit_day=visit_day,
+        active_cookie=active_cookie,
+        active_day=active_day,
         pair_cookies=pair_cookies,
         pair_order_days=pair_order_days,
+        device=device,
+        city=city,
     )
 
 
@@ -177,18 +220,18 @@ def audience(seed: int, day: int) -> DayAudience:
     if day < 0:
         raise ValueError(f"события начинаются в D0: дня {day} на оси нет")
 
-    client_id, buyer, assigned = [], [], []
     # Предыстория ровно такой глубины, чтобы окна хватило и первому дню оси.
-    for born in range(day - world.RETURN_TAIL_DAYS, day + 1):
-        came, bought, ordered = cohort(seed, born).visitors_on(day)
-        client_id.append(came)
-        buyer.append(bought)
-        assigned.append(ordered)
+    parts = [
+        cohort(seed, born).visitors_on(day)
+        for born in range(day - world.RETURN_TAIL_DAYS, day + 1)
+    ]
     return DayAudience(
         day=day,
-        client_id=np.concatenate(client_id),
-        buyer=np.concatenate(buyer),
-        assigned_order=np.concatenate(assigned),
+        client_id=np.concatenate([part.client_id for part in parts]),
+        buyer=np.concatenate([part.buyer for part in parts]),
+        assigned_order=np.concatenate([part.assigned_order for part in parts]),
+        device=np.concatenate([part.device for part in parts]),
+        city=np.concatenate([part.city for part in parts]),
     )
 
 
@@ -202,9 +245,9 @@ def counters(seed: int, days: int) -> PlanCounters:
     # Ниже — вся предыстория: её когорты ещё возвращаются в горизонт.
     for born in range(-world.RETURN_TAIL_DAYS, days):
         born_cohort = cohort(seed, born)
-        inside = (born_cohort.visit_day >= 0) & (born_cohort.visit_day < days)
-        daily += np.bincount(born_cohort.visit_day[inside], minlength=days)
-        seen.append(born_cohort.client_id[np.unique(born_cohort.visit_cookie[inside])])
+        inside = (born_cohort.active_day >= 0) & (born_cohort.active_day < days)
+        daily += np.bincount(born_cohort.active_day[inside], minlength=days)
+        seen.append(born_cohort.client_id[np.unique(born_cohort.active_cookie[inside])])
         appeared = born_cohort.birth_day[
             (born_cohort.birth_day >= 0) & (born_cohort.birth_day < days)
         ]
@@ -227,17 +270,17 @@ def _influx(rng: np.random.Generator, day: int) -> int:
     return base + int(rng.integers(-spread, spread + 1))
 
 
-def _visits(
+def _active_days(
     rng: np.random.Generator, birth_day: NDArray[np.int64], window_end: int
 ) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    """Дни визитов каждой куки: день рождения и возвраты, пока окно открыто."""
+    """Дни активности каждой куки: день рождения и возвраты, пока окно открыто."""
     cookies = birth_day.size
     returns = np.zeros(cookies, dtype=np.int64)
     returning = rng.integers(0, 100, cookies) >= world.ONE_SHOT_PERCENT
-    returns[returning] = 1 + _pick(rng, _RETURN_COUNT_CUMULATIVE, int(returning.sum()))
+    returns[returning] = 1 + pick(rng, _RETURN_COUNT_CUMULATIVE, int(returning.sum()))
 
     owner = np.repeat(np.arange(cookies, dtype=np.int64), returns)
-    delay = 1 + _pick(rng, _RETURN_DELAY_CUMULATIVE, owner.size)
+    delay = 1 + pick(rng, _RETURN_DELAY_CUMULATIVE, owner.size)
     cookie = np.concatenate((np.arange(cookies, dtype=np.int64), owner))
     when = np.concatenate((birth_day, birth_day[owner] + delay))
 
@@ -247,7 +290,7 @@ def _visits(
     order = np.lexsort((when, cookie))
     cookie, when = cookie[order], when[order]
 
-    # Два возврата в один день — один визит: день у куки бывает только один.
+    # Два возврата в один день — один день активности: он у куки бывает один.
     first_of_day = np.ones(cookie.size, dtype=bool)
     first_of_day[1:] = (cookie[1:] != cookie[:-1]) | (when[1:] != when[:-1])
     return cookie[first_of_day], when[first_of_day]
@@ -256,32 +299,49 @@ def _visits(
 def _assign_orders(
     rng: np.random.Generator,
     pair_cookies: NDArray[np.int64],
-    visit_cookie: NDArray[np.int64],
-    visit_day: NDArray[np.int64],
+    active_cookie: NDArray[np.int64],
+    active_day: NDArray[np.int64],
     cookies: int,
 ) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    """Дни гарантированных заказов пары: по визиту каждой из двух кук, от D0.
+    """Дни гарантированных заказов пары: по дню каждой из двух кук, от D0.
 
-    Человеку предыстории, у чьей куки визитов на оси не осталось, пара не
+    Человеку предыстории, у чьей куки дней на оси не осталось, пара не
     назначается: обещать заказ, которого никто не увидит, нечестно. Дни
     берутся той же случайностью, что и всё остальное, — в данных условность
     не видна.
     """
-    on_axis = visit_day >= 0
-    counts = np.bincount(visit_cookie[on_axis], minlength=cookies)
-    # Визиты отсортированы по куке, а внутри куки — по дню, и дни от D0 идут
-    # последними. Значит, дни на оси у куки — хвост её блока: от конца блока
-    # назад ровно `counts` визитов.
-    first_on_axis = np.searchsorted(visit_cookie, np.arange(cookies), "right") - counts
+    on_axis = active_day >= 0
+    counts = np.bincount(active_cookie[on_axis], minlength=cookies)
+    # Дни отсортированы по куке, а внутри куки — по возрастанию, и дни от D0
+    # идут последними. Значит, дни на оси у куки — хвост её блока: от конца
+    # блока назад ровно `counts` дней.
+    first_on_axis = np.searchsorted(active_cookie, np.arange(cookies), "right") - counts
 
     assigned = np.all(counts[pair_cookies] > 0, axis=1)
     pairs = pair_cookies[assigned]
     chosen = first_on_axis[pairs] + rng.integers(0, counts[pairs])
-    return pairs, visit_day[chosen]
+    return pairs, active_day[chosen]
 
 
-def _pick(
-    rng: np.random.Generator, cumulative: NDArray[np.int64], size: int
-) -> NDArray[np.int64]:
-    """Выбор по целым весам: куда попал бросок в общий вес, тот вариант и вышел."""
-    return np.searchsorted(cumulative, rng.integers(0, cumulative[-1], size), "right")
+def _passports(
+    rng: np.random.Generator, twins: NDArray[np.int64], cookies: int
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Устройство и город каждой куки; у пары город один, устройства разные.
+
+    Выводить паспорт арифметикой из `ClientID` было бы дешевле, но про
+    двухкуковые пары знает только план, а два города у одного человека —
+    ложь в данных (спека генератора, раздел 9).
+    """
+    device = pick(rng, _DEVICE_CUMULATIVE, cookies)
+    city = pick(rng, _CITY_CUMULATIVE, cookies)
+
+    first, second = twins[:, 0], twins[:, 1]
+    city[second] = city[first]
+    # Половина справочника выбирается по первой куке, строка в ней — броском.
+    other_half = np.where(_IS_PHONE[device[first]], 0, 1)
+    for half in (0, 1):
+        here = second[other_half == half]
+        device[here] = _DEVICE_HALVES[half][
+            pick(rng, _DEVICE_HALF_CUMULATIVE[half], here.size)
+        ]
+    return device, city

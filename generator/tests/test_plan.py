@@ -11,7 +11,7 @@ import re
 import numpy as np
 import pytest
 
-from clickstream_generator import plan, world
+from clickstream_generator import plan, reference, world
 from clickstream_generator.seeds import CANONICAL_SEED
 
 # Горизонт эталонного снимка — две недели (спека, раздел 5).
@@ -24,9 +24,9 @@ def fresh_memo():
     plan.cohort.cache_clear()
 
 
-def visits_of(cohort: plan.Cohort) -> list[tuple[int, int]]:
-    """Таблица визитов парами «кука — день», как её видит день-функция."""
-    cookies, days = cohort.visit_cookie.tolist(), cohort.visit_day.tolist()
+def active_days_of(cohort: plan.Cohort) -> list[tuple[int, int]]:
+    """Таблица парами «кука — день активности», как её видит день-функция."""
+    cookies, days = cohort.active_cookie.tolist(), cohort.active_day.tolist()
     return list(zip(cookies, days, strict=True))
 
 
@@ -37,10 +37,12 @@ def same_cohort(left: plan.Cohort, right: plan.Cohort) -> bool:
         and np.array_equal(left.client_id, right.client_id)
         and np.array_equal(left.buyer, right.buyer)
         and np.array_equal(left.birth_day, right.birth_day)
-        and np.array_equal(left.visit_cookie, right.visit_cookie)
-        and np.array_equal(left.visit_day, right.visit_day)
+        and np.array_equal(left.active_cookie, right.active_cookie)
+        and np.array_equal(left.active_day, right.active_day)
         and np.array_equal(left.pair_cookies, right.pair_cookies)
         and np.array_equal(left.pair_order_days, right.pair_order_days)
+        and np.array_equal(left.device, right.device)
+        and np.array_equal(left.city, right.city)
     )
 
 
@@ -92,25 +94,25 @@ def test_events_do_not_start_before_the_origin():
 
 
 @pytest.mark.parametrize("day", [-world.RETURN_TAIL_DAYS, -1, 0, 6, 13])
-def test_visits_stay_inside_the_activity_window(day: int):
-    """Окно активности — хвост возвратов от первого визита человека."""
+def test_active_days_stay_inside_the_activity_window(day: int):
+    """Окно активности — хвост возвратов от первого дня человека."""
     cohort = plan.cohort(CANONICAL_SEED, day)
-    assert cohort.visit_day.min() == day
-    assert cohort.visit_day.max() <= day + world.RETURN_TAIL_DAYS
+    assert cohort.active_day.min() == day
+    assert cohort.active_day.max() <= day + world.RETURN_TAIL_DAYS
 
 
-def test_every_cookie_visits_on_the_day_it_was_born():
+def test_every_cookie_is_active_on_the_day_it_was_born():
     cohort = plan.cohort(CANONICAL_SEED, 0)
     cookies = range(cohort.client_id.size)
     born = zip(cookies, cohort.birth_day.tolist(), strict=True)
-    assert set(born) <= set(visits_of(cohort))
+    assert set(born) <= set(active_days_of(cohort))
 
 
-def test_a_cookie_visits_a_day_once():
+def test_a_cookie_gets_one_active_day_at_a_time():
     cohort = plan.cohort(CANONICAL_SEED, 0)
-    visits = visits_of(cohort)
-    assert visits == sorted(visits)
-    assert len(set(visits)) == len(visits)
+    days = active_days_of(cohort)
+    assert days == sorted(days)
+    assert len(set(days)) == len(days)
 
 
 def test_client_ids_are_unique_and_survive_json():
@@ -144,16 +146,44 @@ def test_pairs_are_the_agreed_share_of_buyers():
 
 @pytest.mark.parametrize("day", [-world.RETURN_TAIL_DAYS, -20, 0, 5])
 def test_every_pair_orders_from_both_cookies_on_the_axis(day: int):
-    """Гарантия двухкуковых: заказ назначен на день визита куки, не раньше D0."""
+    """Гарантия двухкуковых: заказ назначен на день активности куки, от D0."""
     cohort = plan.cohort(CANONICAL_SEED, day)
-    visits = set(visits_of(cohort))
+    days_of = set(active_days_of(cohort))
     for cookies, days in zip(
         cohort.pair_cookies.tolist(), cohort.pair_order_days.tolist(), strict=True
     ):
         assert cookies[0] != cookies[1], "заказы пары — с двух разных кук"
         for cookie, order_day in zip(cookies, days, strict=True):
             assert order_day >= 0
-            assert (cookie, order_day) in visits
+            assert (cookie, order_day) in days_of
+
+
+def test_the_passport_of_a_pair_is_one_person_with_two_devices():
+    """Два города у одного человека — ложь в данных (спека, раздел 9)."""
+    cohort = plan.cohort(CANONICAL_SEED, 0)
+    first, second = cohort.pair_cookies[:, 0], cohort.pair_cookies[:, 1]
+    assert np.all(cohort.city[first] == cohort.city[second])
+    assert np.all(cohort.device[first] != cohort.device[second])
+
+    # Обещано не просто «разные строки справочника», а разный род устройства:
+    # ровно одно из двух — телефон, второе десктоп или планшет. Пара «телефон
+    # и ноутбук» мастер-спеки (раздел 5) — про это, а не про запрет планшета.
+    category = np.array([row.category for row in reference.DEVICE_PROFILES])
+    kinds = category[cohort.device[first]], category[cohort.device[second]]
+    assert np.all(kinds[0] != kinds[1])
+    phone = category == reference.PHONE_CATEGORY
+    assert np.all(phone[cohort.device[first]] != phone[cohort.device[second]])
+
+
+def test_the_passport_points_into_the_directories():
+    cohort = plan.cohort(CANONICAL_SEED, 0)
+    for passport, table in (
+        (cohort.device, reference.DEVICE_PROFILES),
+        (cohort.city, reference.CITIES),
+    ):
+        assert passport.size == cohort.client_id.size
+        assert passport.min() >= 0
+        assert passport.max() < len(table)
 
 
 def test_the_daily_audience_matches_the_spec_band():
@@ -244,8 +274,8 @@ def test_plan_arrays_are_whole_numbers():
     for array in (
         cohort.client_id,
         cohort.birth_day,
-        cohort.visit_cookie,
-        cohort.visit_day,
+        cohort.active_cookie,
+        cohort.active_day,
         cohort.pair_cookies,
         cohort.pair_order_days,
     ):
