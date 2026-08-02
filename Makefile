@@ -1,6 +1,6 @@
 COMPOSE ?= docker compose
 
-.PHONY: up down clean ps logs config-test lint test docs smoke smoke-cluster smoke-guards
+.PHONY: up down clean ps logs config-test lint typecheck test docs smoke smoke-cluster smoke-guards
 
 up:
 	$(COMPOSE) up --detach --build --wait --wait-timeout 600
@@ -23,6 +23,9 @@ config-test:
 
 lint:
 	cd generator && uv run ruff check && uv run ruff format --check
+
+typecheck:
+	cd generator && uv run ty check
 
 test:
 	cd generator && uv run pytest
