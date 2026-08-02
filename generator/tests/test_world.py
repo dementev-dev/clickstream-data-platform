@@ -6,7 +6,7 @@
 «в среднем 3–4 возврата» и «средняя кука активна ≈1,9 дня».
 """
 
-from clickstream_generator import world
+from clickstream_generator import catalog, world
 
 
 def mean_by_weights(values: tuple[int, ...], weights: tuple[int, ...]) -> float:
@@ -148,6 +148,23 @@ def test_the_buyer_mark_shows_on_both_steps_of_the_funnel():
     # Заметно чаще прочих, но не «покупают только помеченные»: 5% людей дали
     # бы тогда около 40 заказов в день вместо 240 (спека, раздел 9).
     assert 2 <= lift <= 6
+
+
+def test_the_demand_levels_keep_their_order_and_yield_to_the_intent():
+    """Ряды вероятностей читаются по уровням каталога, и оба убывают.
+
+    Совпадение длин — не формальность: ряды индексируются номером уровня,
+    и новый уровень в файле каталога обязан получить здесь своё число.
+    """
+    rows = (world.SHOPPING_ADD_PERCENT, world.BROWSING_ADD_PERCENT)
+    for row in rows:
+        assert len(row) == len(catalog.DEMAND_LEVELS)
+        assert row[0] > row[1] > row[2], row
+    # Намерение сильнее товара: визит, пришедший покупать, кладёт чаще на
+    # любом уровне — иначе слово «намерение» ничего бы не значило.
+    assert all(shopping > browsing for shopping, browsing in zip(*rows, strict=True))
+    # Но и не всё подряд: товар решает у обоих, спрос не декорация.
+    assert min(world.SHOPPING_ADD_PERCENT) < 100
 
 
 def test_the_buyer_mark_makes_the_cookie_live_longer():

@@ -258,8 +258,9 @@ def _walk(
     goods = catalog.catalog()
     shown = page == Page.PRODUCT
     row_category = np.repeat(visits.category, visits.pages)[shown]
-    # Товар — равномерно внутри категории визита: популярность строк не
-    # моделируется, каталог дорастает механически (см. `catalog`).
+    # Товар — равномерно внутри категории визита: карточки всех товаров
+    # открывают одинаково часто, а различает их уровень спроса — уже в
+    # корзине, а не в показе (см. `catalog`).
     inside = rng.integers(0, goods.count[row_category])
     product = np.full(total, -1, dtype=np.int64)
     product[shown] = goods.grouped[goods.first[row_category] + inside]

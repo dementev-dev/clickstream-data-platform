@@ -8,12 +8,18 @@
 граница модельных суток режет всё, что за неё вышло: визит, у которого
 подтверждение срезано полуночью, покупки не даёт — заказа не было.
 
-**Корзина шире заказа.** Посетитель кладёт товары тех карточек, которые
-открывал в этом визите; карточка, открытая дважды, даёт одну позицию —
-повторный просмотр это раздумье, а не второй товар. Покупает он не всё:
-часть позиций остаётся брошенной. Иначе событие корзины не рассказывало бы
-ничего сверх покупки — заказ был бы её точной копией, и сравнивать было бы
-нечего.
+**Кладёт любой визит, открывший карточку.** Положить и корзину не открыть —
+самый массовый сюжет магазина, поэтому событие корзины не привязано к
+странице `/cart`: иначе факт добавления идеально предсказывался бы более
+поздним просмотром страницы, а такого равенства в живых данных не бывает.
+Решается каждая открытая карточка отдельно, а не визит целиком, и решают её
+двое: намерение визита и уровень спроса товара (числа мира). Карточка,
+открытая дважды, даёт одну позицию — повторный просмотр это раздумье, а не
+второй товар.
+
+**Корзина шире заказа.** Покупает посетитель не всё, что положил: часть
+позиций остаётся брошенной. Иначе событие корзины не рассказывало бы ничего
+сверх покупки — заказ был бы её точной копией, и сравнивать было бы нечего.
 
 **Деньги считаются целыми копейками.** В колонку `productPrice` ложатся
 целые рубли, как у Метрики, а дробное число в событии одно —
@@ -145,7 +151,7 @@ def weave(
     события встают между ними, и поток пересобирается одним порядком.
     """
     rng = day_stream(seed, day, Component.COMMERCE)
-    baskets = _baskets(page, product, columns["VisitID"])
+    baskets = _baskets(rng, page, product, columns["VisitID"])
     if not len(baskets):
         return columns, page, product
 
@@ -172,13 +178,24 @@ def _draws(rng: np.random.Generator, baskets: _Baskets) -> _Draws:
 
 
 def _baskets(
-    page: NDArray[np.uint8], product: NDArray[np.int64], visit: NDArray[np.uint64]
+    rng: np.random.Generator,
+    page: NDArray[np.uint8],
+    product: NDArray[np.int64],
+    visit: NDArray[np.uint64],
 ) -> _Baskets:
     """Что посетитель положил в корзину и дошёл ли до заказа.
 
-    Корзина есть у визита, дошедшего до страницы корзины; в ней товары всех
-    карточек этого визита. Карточка, открытая дважды, даёт одну позицию —
-    остаётся первая: тогда товар и кладут.
+    Корзина есть у всякого визита, положившего хоть что-то, — не только у
+    дошедшего до страницы `/cart`. Кандидаты — карточки, открытые в визите,
+    по одной на товар: карточка, открытая дважды, даёт одну позицию, и
+    остаётся первая — тогда товар и кладут.
+
+    Намерение визита берётся из шага воронки: тот, кто дошёл до страницы
+    корзины, пришёл покупать. Позиция у него есть всегда — страница корзины
+    при пустой корзине невозможна, — и держится это высокой вероятностью, а
+    не принуждением: спасать приходится считаные проценты таких визитов.
+    Принуждай мы всех, корзина схлопнулась бы до одной позиции, а заказ до
+    одного товара.
     """
     order = np.argsort(visit, kind="stable")
     page, product, visit = page[order], product[order], visit[order]
@@ -187,52 +204,101 @@ def _baskets(
     # упорядоченным, а сортировка по визиту устойчивая.
     started = np.concatenate(([True], visit[1:] != visit[:-1]))
     number = np.cumsum(started) - 1
+    visits = int(started.sum())
 
-    with_cart = number[page == Page.CART]
-    basket_of_visit = np.full(int(started.sum()), -1, dtype=np.int64)
-    basket_of_visit[with_cart] = np.arange(with_cart.size)
-
-    cards = np.flatnonzero((page == Page.PRODUCT) & (basket_of_visit[number] >= 0))
+    goods = catalog.catalog()
+    cards = np.flatnonzero(page == Page.PRODUCT)
     # Ключ «визит и товар»: `np.unique` отдаёт индексы первых вхождений,
-    # поэтому вторая карточка того же товара позиции не добавляет.
-    key = number[cards] * catalog.catalog().sku.size + product[cards]
-    positions = np.sort(cards[np.unique(key, return_index=True)[1]])
+    # поэтому вторая карточка того же товара кандидата не добавляет.
+    key = number[cards] * goods.sku.size + product[cards]
+    opened = np.sort(cards[np.unique(key, return_index=True)[1]])
+    holder = number[opened]
 
-    # Подтверждение без корзины невозможно: полночь режет визит с хвоста, а
-    # корзина в нём раньше подтверждения — поэтому у каждого подтверждения
-    # корзина есть, и номер её всегда найдётся.
+    shopping = np.zeros(visits, dtype=np.bool_)
+    shopping[number[page == Page.CART]] = True
+    taken = _taken(rng, goods.demand[product[opened]], shopping[holder])
+    # Кандидаты визита лежат подряд, визиты идут по порядку — поэтому начало
+    # каждого куска находится накопленной суммой.
+    opened_count = np.bincount(holder, minlength=visits)
+    opened_first = np.cumsum(opened_count) - opened_count
+    empty = shopping & (np.bincount(holder[taken], minlength=visits) == 0)
+    _at_least_one(rng, taken, opened_first, opened_count, empty)
+
+    positions, owner = opened[taken], holder[taken]
+    with_basket = np.unique(owner)
+    basket_of_visit = np.full(visits, -1, dtype=np.int64)
+    basket_of_visit[with_basket] = np.arange(with_basket.size)
+
+    # Подтверждение без корзины невозможно: до него визит прошёл страницу
+    # корзины, а у неё позиция есть всегда — поэтому номер корзины найдётся.
     confirmed = np.flatnonzero(page == Page.CONFIRMATION)
-    confirmation = np.full(with_cart.size, -1, dtype=np.int64)
+    confirmation = np.full(with_basket.size, -1, dtype=np.int64)
     confirmation[basket_of_visit[number[confirmed]]] = order[confirmed]
 
-    basket = basket_of_visit[number[positions]]
-    count = np.bincount(basket, minlength=with_cart.size)
+    basket = basket_of_visit[owner]
+    count = np.bincount(basket, minlength=with_basket.size)
     return _Baskets(
         anchor=order[positions],
         product=product[positions],
         basket=basket,
-        # Позиции лежат подряд, корзины идут по порядку визитов — поэтому
-        # начало каждого куска находится накопленной суммой.
+        # Позиции лежат подряд, корзины идут по порядку визитов — начало
+        # каждого куска находится той же накопленной суммой.
         first=np.cumsum(count) - count,
         count=count,
         confirmation=confirmation,
     )
 
 
+def _taken(
+    rng: np.random.Generator,
+    demand: NDArray[np.int64],
+    shopping: NDArray[np.bool_],
+) -> NDArray[np.bool_]:
+    """Дошла ли открытая карточка до корзины: решают намерение и товар.
+
+    Два ряда чисел мира по уровням спроса: один для визита, пришедшего
+    покупать, другой для того, кто просто смотрит. Товар решает у обоих, но
+    у смотрящего он решает почти всё — потому конверсия «карточка → корзина»
+    по уровням спроса и становится различимой.
+    """
+    chance = np.where(
+        shopping,
+        np.array(world.SHOPPING_ADD_PERCENT)[demand],
+        np.array(world.BROWSING_ADD_PERCENT)[demand],
+    )
+    return rng.integers(0, 100, demand.size) < chance
+
+
 def _kept(rng: np.random.Generator, baskets: _Baskets) -> NDArray[np.bool_]:
     """Какие позиции корзины дошли до заказа: часть остаётся брошенной.
 
-    Пустым заказ не бывает: если брошены все позиции, одна возвращается —
-    какая, решает свой бросок. Хотя бы одна позиция у корзины есть всегда:
-    перед корзиной визит обязательно открывал карточку.
+    Пустым заказ не бывает: если брошены все позиции, одна возвращается.
     """
     kept = (
         rng.integers(0, 100, baskets.product.size) >= world.ABANDONED_POSITION_PERCENT
     )
-    rescued = baskets.first + rng.integers(0, baskets.count)
     empty = np.bincount(baskets.basket[kept], minlength=len(baskets)) == 0
-    kept[rescued[empty]] = True
+    _at_least_one(rng, kept, baskets.first, baskets.count, empty)
     return kept
+
+
+def _at_least_one(
+    rng: np.random.Generator,
+    chosen: NDArray[np.bool_],
+    first: NDArray[np.int64],
+    count: NDArray[np.int64],
+    empty: NDArray[np.bool_],
+) -> None:
+    """Возвращает один выбор тем группам, у которых бросок унёс все.
+
+    Приём общий у двух мест: у визита выбираются карточки, у корзины —
+    позиции, а правило одно — пустой ни та, ни другая быть не может. Какой
+    выбор вернуть, решает свой бросок: брать первый значило бы, что ранняя
+    карточка визита переживает любой бросок. Группа без членов сюда не
+    приходит: у визита со страницей корзины карточка была, у корзины —
+    позиция.
+    """
+    chosen[first[empty] + rng.integers(0, count[empty])] = True
 
 
 def _coupons(rng: np.random.Generator, baskets: int) -> NDArray[np.int64]:

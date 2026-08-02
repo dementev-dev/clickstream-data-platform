@@ -21,6 +21,9 @@ from clickstream_generator.seeds import CANONICAL_SEED, Component
 
 WEEKDAY = 2
 WEEK = 7
+# Окно эталонного снимка: доли по уровням спроса меряются на нём целиком —
+# на одном дне у самого редкого уровня набирается слишком мало карточек.
+FORTNIGHT = 14
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +41,13 @@ def weekday() -> day.Day:
 def week() -> list[day.Day]:
     """Неделя мира: повторные покупки и обещания пар живут между днями."""
     return [day.stream(CANONICAL_SEED, number) for number in range(WEEK)]
+
+
+@pytest.fixture(scope="module")
+def fortnight(week: list[day.Day]) -> list[day.Day]:
+    """Две недели: неделя пересчитанной не бывает — день чист от соседей."""
+    later = range(WEEK, FORTNIGHT)
+    return week + [day.stream(CANONICAL_SEED, number) for number in later]
 
 
 def rows_of(events: day.Day, kind: str) -> dict[str, NDArray[Any]]:
@@ -69,11 +79,58 @@ def test_the_day_carries_both_trade_events(weekday: day.Day):
     assert carts["WatchID"].size > 2 * orders["WatchID"].size
 
 
+def visits_with(events: day.Day, page: int) -> set[int]:
+    """Визиты, у которых эта страница магазина дожила до потока.
+
+    Считаются просмотры страниц, а не строки с такой же страницей: торговое
+    событие садится на свою страницу и несёт её же, поэтому маска по одному
+    `page` посчитала бы событие корзины за просмотр карточки.
+    """
+    here = (events.columns["EventType"] == "pageview") & (events.page == page)
+    return set(events.columns["VisitID"][here].tolist())
+
+
 def confirmed_visits(events: day.Day) -> set[int]:
     """Визиты, чья страница подтверждения дожила до потока."""
+    return visits_with(events, Page.CONFIRMATION)
+
+
+def visits_that_put(events: day.Day) -> set[int]:
+    """Визиты с событием корзины — по типу события, а не по массивам товаров.
+
+    Строка покупки тоже несёт товары, поэтому «строка с `productID`» — это
+    не «событие корзины».
+    """
+    return set(rows_of(events, commerce.ADD_TO_CART)["VisitID"].tolist())
+
+
+def cart_products(events: day.Day) -> list[int]:
+    """Номера товаров, положенных в корзину, — по позиции на строку."""
+    here = events.columns["EventType"] == commerce.ADD_TO_CART
+    return events.product[here].tolist()
+
+
+def card_views(events: day.Day) -> int:
+    """Просмотры карточек товара в дне — строками потока, с повторами."""
     pageview = events.columns["EventType"] == "pageview"
-    here = pageview & (events.page == Page.CONFIRMATION)
-    return set(events.columns["VisitID"][here].tolist())
+    return int((pageview & (events.page == Page.PRODUCT)).sum())
+
+
+def opened_cards(events: day.Day) -> set[tuple[int, int]]:
+    """Разные карточки визитов: повторный просмотр внутри визита — один раз.
+
+    Так же считается и позиция корзины, поэтому это и есть честный
+    знаменатель конверсии «просмотр карточки → корзина».
+    """
+    pageview = events.columns["EventType"] == "pageview"
+    here = pageview & (events.page == Page.PRODUCT)
+    return set(
+        zip(
+            events.columns["VisitID"][here].tolist(),
+            events.product[here].tolist(),
+            strict=True,
+        )
+    )
 
 
 def test_a_confirmation_in_the_stream_always_has_its_purchase(weekday: day.Day):
@@ -238,26 +295,63 @@ def test_the_rounded_price_does_not_add_up_to_the_revenue(weekday: day.Day):
     assert 0.1 < apart / orders["WatchID"].size < 0.9
 
 
-def test_the_order_is_narrower_than_the_cart(weekday: day.Day):
-    """Часть положенных позиций не куплена — иначе сравнивать было бы нечего."""
-    carts = rows_of(weekday, commerce.ADD_TO_CART)
-    orders = rows_of(weekday, commerce.PURCHASE)
+def basket_and_order(events: day.Day) -> tuple[list[int], list[int]]:
+    """По каждому заказу — сколько позиций было в корзине и сколько куплено.
+
+    Заодно проверяется само отношение «заказ из корзины»: пустых заказов не
+    бывает, купленного мимо корзины не бывает, позиция в заказе одна на товар.
+    """
+    carts = rows_of(events, commerce.ADD_TO_CART)
+    orders = rows_of(events, commerce.PURCHASE)
     put: dict[int, set[str]] = {}
     for visit, article in zip(
         carts["VisitID"].tolist(), (cell[0] for cell in carts["productID"]), strict=True
     ):
         put.setdefault(visit, set()).add(article)
 
-    dropped = whole = 0
+    baskets: list[int] = []
+    sizes: list[int] = []
     for visit, bought in zip(
         orders["VisitID"].tolist(), cells(orders["productID"]), strict=True
     ):
         assert bought, "пустых заказов не бывает"
         assert set(bought) <= put[visit], "куплено то, чего не клали в корзину"
         assert len(set(bought)) == len(bought), "позиция в заказе одна на товар"
-        dropped += len(put[visit]) - len(bought)
-        whole += len(put[visit])
-    assert 0.05 < dropped / whole < 0.30
+        baskets.append(len(put[visit]))
+        sizes.append(len(bought))
+    return baskets, sizes
+
+
+def test_the_order_is_narrower_than_the_cart(weekday: day.Day):
+    """Часть положенных позиций не куплена — иначе сравнивать было бы нечего."""
+    baskets, sizes = basket_and_order(weekday)
+    assert sum(baskets) > sum(sizes)
+
+
+def test_the_order_keeps_its_shape_across_the_snapshot(fortnight: list[day.Day]):
+    """Состав заказа — доли окна снимка, а не одного дня.
+
+    Заказов в дне около 240, и доля однопозиционных гуляет по дням на
+    несколько пунктов от одной случайности выборки; вилки тикета заданы на
+    14 днях, там же они и меряются. Список позиций — единственный носитель
+    урока про вложенный JSON: схлопнись он в один товар, урок бы умер.
+    """
+    baskets: list[int] = []
+    sizes: list[int] = []
+    for events in fortnight:
+        was, bought = basket_and_order(events)
+        baskets += was
+        sizes += bought
+
+    assert 1.6 < sum(sizes) / len(sizes) < 2.2
+    assert 0.40 < sum(size == 1 for size in sizes) / len(sizes) < 0.60
+    # Брошено не ничего и не всё. Вилка та же, что и до правки: число мира
+    # опустилось с 15% до 10%, замер по покупающим корзинам — с 12,0% до
+    # 7,2%, и запас до нижней границы остался в полтора раза. Ниже её
+    # ронять незачем: с ней сторож замечает, что число мира срезали вдвое,
+    # а без неё — уже нет.
+    dropped = 1 - sum(sizes) / sum(baskets)
+    assert 0.05 < dropped < 0.30
 
 
 def test_the_cart_holds_only_what_the_visitor_opened(weekday: day.Day):
@@ -282,6 +376,102 @@ def test_the_cart_holds_only_what_the_visitor_opened(weekday: day.Day):
         assert set(products) <= shown[this]
         # Карточка, открытая дважды, даёт одну позицию, а не две.
         assert len(set(products)) == len(products)
+
+
+def test_putting_something_in_the_cart_is_not_opening_the_cart_page(
+    fortnight: list[day.Day],
+):
+    """Положил и корзину не открыл — самый массовый сюжет магазина.
+
+    До правки два множества совпадали в точности все 14 дней, и факт
+    добавления идеально предсказывался более поздним просмотром страницы —
+    такого равенства в живых данных не бывает. Сторож меряет долю, а не факт
+    различия одним визитом: одно расхождение прошлую ложь не лечит.
+    """
+    quiet = putting = 0
+    for events in fortnight:
+        put = visits_that_put(events)
+        quiet += len(put - visits_with(events, Page.CART))
+        putting += len(put)
+    assert quiet / putting > 1 / 3
+
+
+def test_a_visit_that_opened_the_cart_page_has_something_in_the_cart(
+    fortnight: list[day.Day],
+):
+    """Страница корзины при пустой корзине невозможна.
+
+    Это включение намеренное и остаётся: ломалось обратное. Проверяется на
+    обеих неделях — и на буднях, и на выходных: правило про всякий визит, а
+    не про удачный день.
+    """
+    for events in fortnight:
+        assert visits_with(events, Page.CART) <= visits_that_put(events)
+
+
+def test_no_demand_level_is_locked_behind_the_cart_page(fortnight: list[day.Day]):
+    """Отвязка от страницы корзины — про весь ассортимент, а не про часть.
+
+    Обнули вероятность целому уровню — и по его товарам вернётся ровно то
+    равенство, ради которого правка делалась: «положили — значит, откроют
+    корзину», без единого исключения на четверти каталога. Сторож меряет
+    долю у каждого уровня, а не факт: одно событие такую примету не лечит.
+    """
+    goods = catalog.catalog()
+    levels = range(len(catalog.DEMAND_LEVELS))
+    quiet = [0] * len(catalog.DEMAND_LEVELS)
+    put = [0] * len(catalog.DEMAND_LEVELS)
+    for events in fortnight:
+        shopping = visits_with(events, Page.CART)
+        here = events.columns["EventType"] == commerce.ADD_TO_CART
+        for visit, number in zip(
+            events.columns["VisitID"][here].tolist(),
+            events.product[here].tolist(),
+            strict=True,
+        ):
+            put[goods.demand[number]] += 1
+            quiet[goods.demand[number]] += visit not in shopping
+
+    for level in levels:
+        assert quiet[level] / put[level] > 0.10, catalog.DEMAND_LEVELS[level]
+
+
+def test_the_demand_level_tells_the_cart_conversion_apart(fortnight: list[day.Day]):
+    """Привлекательность товара стала измеримой величиной, а не шумом.
+
+    Знаменатель — разные карточки товаров этого уровня: повторный просмотр
+    внутри визита считается один раз, так же как считается позиция. До
+    правки решение принималось один раз на визит, и по sku выходил чистый
+    шум: внутри воронки 100%, вне её 0%.
+    """
+    goods = catalog.catalog()
+    levels = range(len(catalog.DEMAND_LEVELS))
+    shown = [0] * len(catalog.DEMAND_LEVELS)
+    put = [0] * len(catalog.DEMAND_LEVELS)
+    for events in fortnight:
+        for _, number in opened_cards(events):
+            shown[goods.demand[number]] += 1
+        for number in cart_products(events):
+            put[goods.demand[number]] += 1
+
+    share = [put[level] / shown[level] for level in levels]
+    magnet, usual, slow = share
+    assert magnet > usual > slow
+    assert magnet >= 2 * slow
+
+
+def test_the_cart_events_stay_inside_the_event_budget(fortnight: list[day.Day]):
+    """Меняется не сколько кладут, а кто и что: бюджет событий на месте.
+
+    Доля просмотров карточек, дошедших до корзины, — та же величина, что
+    держала бюджет до правки; средний день остаётся около 50 тыс. событий
+    (спека генератора, разделы 5 и 9).
+    """
+    put = sum(len(cart_products(events)) for events in fortnight)
+    seen = sum(card_views(events) for events in fortnight)
+    assert 0.05 < put / seen < 0.09
+    average = sum(len(events) for events in fortnight) / len(fortnight)
+    assert 48_000 < average < 52_000
 
 
 def test_a_trade_event_sits_on_the_page_that_sent_it(weekday: day.Day):
