@@ -1,6 +1,6 @@
 COMPOSE ?= docker compose
 
-.PHONY: up down clean ps logs config-test lint typecheck test docs smoke smoke-cluster
+.PHONY: up down clean ps logs config-test lint typecheck test docs smoke check-clickhouse check-services
 
 up:
 	$(COMPOSE) up --detach --build --wait --wait-timeout 600
@@ -36,5 +36,8 @@ docs:
 smoke:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-smoke.sh
 
-smoke-cluster:
+check-clickhouse:
 	./scripts/clickhouse-smoke.sh
+
+check-services:
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-services.sh

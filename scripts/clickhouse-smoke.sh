@@ -65,14 +65,14 @@ on_exit() {
     if [[ "$status" -ne 0 ]]; then
         printf 'Сбой проверки: выполняется быстрая очистка временных таблиц...\n' >&2
     fi
-    cleanup_tables || printf 'ПРЕДУПРЕЖДЕНИЕ: очистка не завершена; после восстановления стенда повторите make smoke-cluster.\n' >&2
+    cleanup_tables || printf 'ПРЕДУПРЕЖДЕНИЕ: очистка не завершена; после восстановления стенда повторите make check-clickhouse.\n' >&2
     exit "$status"
 }
 
 on_signal() {
     trap - EXIT INT TERM
     printf 'Проверка прервана пользователем: выполняется быстрая очистка временных таблиц...\n' >&2
-    cleanup_tables || printf 'ПРЕДУПРЕЖДЕНИЕ: очистка не завершена; после восстановления стенда повторите make smoke-cluster.\n' >&2
+    cleanup_tables || printf 'ПРЕДУПРЕЖДЕНИЕ: очистка не завершена; после восстановления стенда повторите make check-clickhouse.\n' >&2
     exit 130
 }
 
