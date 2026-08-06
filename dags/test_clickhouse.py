@@ -42,9 +42,10 @@ NODES = (
 
 
 def _clickhouse_client():
-    # clickhouse_connect стоит только в образе Airflow, а малые проверки грузят
-    # этот модуль обычным интерпретатором, где пакета нет. Импорт верхнего
-    # уровня красит make config-test, поэтому он живёт здесь.
+    # clickhouse_connect импортируется внутри функции, а не наверху файла:
+    # обработчик DAG разбирает этот файл снова и снова, и импорт наверху
+    # оплачивался бы каждым разбором. Тяжёлые импорты Airflow советует
+    # держать внутри задач.
     import clickhouse_connect
 
     connection = Connection.get("clickhouse_default")
@@ -82,6 +83,8 @@ def _drop_tables(client) -> None:
     )
 
 
+# Единственная проверка, вынесенная из задач: её делают обе, до создания таблиц
+# и после уборки.
 def _assert_tables_absent(client) -> None:
     for node_name, source in NODES:
         remaining = _table_engines(client, source)
@@ -89,32 +92,6 @@ def _assert_tables_absent(client) -> None:
             raise RuntimeError(
                 f"служебные таблицы остались на {node_name}: {remaining}"
             )
-
-
-def _assert_tables_created(client) -> None:
-    for node_name, source in NODES:
-        actual_tables = _table_engines(client, source)
-        if actual_tables != EXPECTED_TABLES:
-            raise RuntimeError(
-                f"неверный набор таблиц на {node_name}: {actual_tables}"
-            )
-
-
-def _assert_marker_path(
-    *,
-    distributed_rows: list[tuple[int, str, str]],
-    write_hostname: str,
-    node_2_hostname: str,
-    marker: str,
-) -> None:
-    if write_hostname == node_2_hostname:
-        raise RuntimeError("запись и чтение маркера должны выполняться с разных нод")
-    expected_rows = [(1, write_hostname, marker)]
-    if distributed_rows != expected_rows:
-        raise RuntimeError(
-            "нода 2 не прочитала маркер первого шарда через Distributed: "
-            f"{marker}, получено {distributed_rows}"
-        )
 
 
 @dag(
@@ -157,7 +134,12 @@ def test_clickhouse():
                 )
                 """
             )
-            _assert_tables_created(client)
+            for node_name, source in NODES:
+                actual_tables = _table_engines(client, source)
+                if actual_tables != EXPECTED_TABLES:
+                    raise RuntimeError(
+                        f"неверный набор таблиц на {node_name}: {actual_tables}"
+                    )
         finally:
             client.close()
 
@@ -211,12 +193,15 @@ def test_clickhouse():
                 """,
                 parameters={"marker": written["marker"]},
             ).result_rows
-            _assert_marker_path(
-                distributed_rows=distributed_rows,
-                write_hostname=written["hostname"],
-                node_2_hostname=node_2_rows[0][0],
-                marker=written["marker"],
-            )
+            if written["hostname"] == node_2_rows[0][0]:
+                raise RuntimeError(
+                    "запись и чтение маркера должны выполняться с разных нод"
+                )
+            if distributed_rows != [(1, written["hostname"], written["marker"])]:
+                raise RuntimeError(
+                    "нода 2 не прочитала маркер первого шарда через Distributed: "
+                    f"{written['marker']}, получено {distributed_rows}"
+                )
         finally:
             client.close()
 

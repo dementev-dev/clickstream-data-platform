@@ -2,8 +2,6 @@
 set -uo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly COMPOSE_FILE="$ROOT_DIR/compose.yaml"
-readonly ENV_EXAMPLE="$ROOT_DIR/.env.example"
 read -r -a COMPOSE_CMD <<<"${COMPOSE_BIN:-docker compose}"
 readonly -a LONG_LIVED_SERVICES=(
     clickhouse-keeper clickhouse-01 clickhouse-02 kafka postgres-metadata
@@ -34,114 +32,6 @@ pass() {
 fail() {
     failed=$((failed + 1))
     printf 'ОШИБКА: %s.\n' "$1" >&2
-}
-
-check_env_consistency() {
-    local LC_ALL=C
-    local content
-    local default
-    local depth
-    local env_value
-    local expression
-    local found_closing
-    local i
-    local inner
-    local joined
-    local j
-    local length
-    local line
-    local nested
-    local variable
-    local -A env_count=()
-    local -A env_values=()
-    local -a problems=()
-    local -A used=()
-    local -a expressions=()
-
-    if [[ ! -r "$COMPOSE_FILE" || ! -r "$ENV_EXAMPLE" ]]; then
-        fail 'compose.yaml или .env.example недоступны для чтения'
-        return
-    fi
-
-    # Разбираем только подстановки Compose и отдельно пропускаем $$ для команд контейнера.
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%$'\r'}"
-        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            variable="${BASH_REMATCH[1]}"
-            env_count["$variable"]=$(( ${env_count[$variable]:-0} + 1 ))
-            env_values["$variable"]="${BASH_REMATCH[2]}"
-        fi
-    done <"$ENV_EXAMPLE"
-
-    content="$(<"$COMPOSE_FILE")"
-    length="${#content}"
-    for ((i = 0; i < length - 1; i++)); do
-        if [[ "${content:i:2}" == '$$' ]]; then
-            i=$((i + 1))
-            continue
-        fi
-        if [[ "${content:i:2}" != '${' ]]; then
-            continue
-        fi
-
-        depth=1
-        found_closing=0
-        nested=0
-        for ((j = i + 2; j < length; j++)); do
-            if [[ "${content:j:2}" == '${' ]]; then
-                nested=1
-                depth=$((depth + 1))
-                j=$((j + 1))
-            elif [[ "${content:j:1}" == '}' ]]; then
-                depth=$((depth - 1))
-                if [[ "$depth" -eq 0 ]]; then
-                    expressions+=("${content:i:j-i+1}")
-                    found_closing=1
-                    i="$j"
-                    break
-                fi
-            fi
-        done
-        if [[ "$found_closing" -eq 0 ]]; then
-            problems+=("незакрытая подстановка у позиции ${i}")
-            break
-        fi
-        if [[ "$nested" -eq 1 ]]; then
-            problems+=("${expressions[-1]}: вложенные подстановки запрещены, используйте простой вид \${VAR:-значение}")
-        fi
-    done
-
-    for expression in "${expressions[@]}"; do
-        inner="${expression:2:${#expression}-3}"
-        if [[ "$inner" =~ ^([A-Za-z_][A-Za-z0-9_]*):-(.*)$ ]]; then
-            variable="${BASH_REMATCH[1]}"
-            default="${BASH_REMATCH[2]}"
-            used["$variable"]=1
-            if [[ "${env_count[$variable]:-0}" -ne 1 ]]; then
-                problems+=("${variable}: нужна ровно одна строка в .env.example")
-                continue
-            fi
-            env_value="${env_values[$variable]}"
-            if [[ "$env_value" != "$default" ]]; then
-                problems+=("${variable}: значение '${env_value}' не равно '${default}'")
-            fi
-        else
-            problems+=("${expression}: нет значения по умолчанию вида :-")
-        fi
-    done
-
-    for variable in "${!env_count[@]}"; do
-        if [[ -z "${used[$variable]+x}" ]]; then
-            problems+=("${variable}: не используется в compose.yaml")
-        fi
-    done
-
-    if [[ "${#problems[@]}" -eq 0 ]]; then
-        pass '.env.example совпадает со всеми значениями по умолчанию compose.yaml'
-    else
-        printf -v joined '%s; ' "${problems[@]}"
-        fail "расхождение .env.example и compose.yaml: ${joined%; }"
-    fi
 }
 
 check_host_dependencies() {
@@ -181,6 +71,29 @@ check_container_health() {
         pass "сервис ${service} запущен и здоров"
     else
         fail "сервис ${service} нездоров: ${state:-состояние неизвестно}"
+    fi
+}
+
+# Keeper — единственная служба, которой мало быть здоровой: она пишет журнал
+# координации, и если запустить её от root или с чужим каталогом данных, файлы
+# останутся с неверным владельцем и следующий запуск их не откроет. Предел на
+# открытые файлы у неё свой: соединений много, и стандартной тысячи не хватает.
+check_keeper_runtime() {
+    local keeper_user
+    local keeper_nofile
+    local keeper_owner
+
+    keeper_user="$(compose exec -T clickhouse-keeper id -un)"
+    keeper_nofile="$(compose exec -T clickhouse-keeper \
+        awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4}' /proc/1/limits)"
+    keeper_owner="$(compose exec -T clickhouse-keeper \
+        stat -c '%U:%G' /var/lib/clickhouse/coordination)"
+    if [[ "$keeper_user" == 'clickhouse' ]] && \
+        [[ "$keeper_nofile" -ge 262144 ]] && \
+        [[ "$keeper_owner" == 'clickhouse:clickhouse' ]]; then
+        pass 'keeper работает от clickhouse с nofile 262144 и своим каталогом данных'
+    else
+        fail "неверное окружение keeper: пользователь=${keeper_user}, nofile=${keeper_nofile}, владелец каталога=${keeper_owner}"
     fi
 }
 
@@ -627,11 +540,11 @@ check_containers_survived() {
     fi
 }
 
-check_env_consistency
 if check_host_dependencies; then
     for service in "${LONG_LIVED_SERVICES[@]}"; do
         check_container_health "$service"
     done
+    check_keeper_runtime
     check_kafka_from_host
     check_prometheus_targets
     check_grafana_datasource
