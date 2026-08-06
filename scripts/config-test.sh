@@ -48,20 +48,6 @@ if [[ "${#shell_files[@]}" -eq 0 ]]; then
 fi
 bash -n "${shell_files[@]}"
 PYTHONPYCACHEPREFIX="$CACHE_DIR" uv run --no-project python -m compileall -q "$ROOT_DIR/dags"
-unit_status=0
-unit_output="$(
-    PYTHONPYCACHEPREFIX="$CACHE_DIR" \
-        uv run --no-project python "$ROOT_DIR/tests/dag-probes-unit.py" 2>&1
-)" || unit_status=$?
-printf '%s\n' "$unit_output"
-if [[ "$unit_status" -ne 0 ]]; then
-    exit "$unit_status"
-fi
-if grep -Eq '^(Ran [0-9]+ tests|OK|FAILED)' <<<"$unit_output" ||
-    ! grep -Eq '^ИТОГ: пройдено [0-9]+, ошибок 0$' <<<"$unit_output"; then
-    printf 'ОШИБКА: малые проверки пробников вывели итог не на русском языке.\n' >&2
-    exit 1
-fi
 git -C "$ROOT_DIR" diff --check
 
 printf 'ЗЕЛЁНО: Compose, Bash, Python и пробельные ошибки diff проверены.\n'

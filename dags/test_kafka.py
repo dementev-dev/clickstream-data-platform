@@ -74,48 +74,6 @@ class RecordAddress(NamedTuple):
     offset: int
 
 
-def _assert_all_delivered(undelivered: int, marker: str) -> None:
-    if undelivered:
-        raise RuntimeError(
-            f"Kafka не приняла маркер за {FLUSH_TIMEOUT_SEC} с, "
-            f"не доставлено сообщений {undelivered}: {marker}"
-        )
-
-
-def _assert_no_delivery_errors(delivery_errors: list[str], marker: str) -> None:
-    if delivery_errors:
-        raise RuntimeError(
-            f"Kafka отказалась принять маркер {marker}: {delivery_errors}"
-        )
-
-
-def _assert_confirmed_once(addresses: list[RecordAddress], marker: str) -> None:
-    if len(addresses) != 1:
-        raise RuntimeError(
-            f"Kafka подтвердила запись маркера {marker} "
-            f"не одним сообщением: {addresses}"
-        )
-
-
-def _assert_message_arrived(message, marker: str) -> None:
-    if message is None:
-        raise RuntimeError(
-            f"Kafka молчала {READ_DEADLINE_SEC} с и не вернула маркер: {marker}"
-        )
-
-
-def _assert_no_read_error(message) -> None:
-    if message.error():
-        raise RuntimeError(f"Kafka вернула ошибку чтения: {message.error()}")
-
-
-def _assert_marker_matches(message, marker: str) -> None:
-    if message.value() != marker.encode():
-        raise RuntimeError(
-            f"по адресу записи лежит не маркер запуска {marker}: {message.value()!r}"
-        )
-
-
 @dag(
     dag_id="test_kafka",
     schedule=None,
@@ -127,6 +85,10 @@ def _assert_marker_matches(message, marker: str) -> None:
 def test_kafka():
     @task
     def write_marker() -> dict[str, str | int]:
+        # confluent_kafka импортируется внутри задачи, а не наверху файла:
+        # обработчик DAG разбирает этот файл снова и снова, и импорт наверху
+        # оплачивался бы каждым разбором. Тяжёлые импорты Airflow советует
+        # держать внутри задач.
         from confluent_kafka import Producer
 
         marker = f"{get_current_context()['run_id']}:{uuid.uuid4()}"
@@ -158,9 +120,20 @@ def test_kafka():
         finally:
             undelivered = producer.flush(FLUSH_TIMEOUT_SEC)
 
-        _assert_all_delivered(undelivered, marker)
-        _assert_no_delivery_errors(delivery_errors, marker)
-        _assert_confirmed_once(addresses, marker)
+        if undelivered:
+            raise RuntimeError(
+                f"Kafka не приняла маркер за {FLUSH_TIMEOUT_SEC} с, "
+                f"не доставлено сообщений {undelivered}: {marker}"
+            )
+        if delivery_errors:
+            raise RuntimeError(
+                f"Kafka отказалась принять маркер {marker}: {delivery_errors}"
+            )
+        if len(addresses) != 1:
+            raise RuntimeError(
+                f"Kafka подтвердила запись маркера {marker} "
+                f"не одним сообщением: {addresses}"
+            )
         return {
             "marker": marker,
             "partition": addresses[0].partition,
@@ -190,9 +163,17 @@ def test_kafka():
             # другого нечем, поэтому у чтения обязан быть крайний срок.
             while message is None and time.monotonic() < deadline:
                 message = consumer.poll(POLL_TIMEOUT_SEC)
-            _assert_message_arrived(message, marker)
-            _assert_no_read_error(message)
-            _assert_marker_matches(message, marker)
+            if message is None:
+                raise RuntimeError(
+                    f"Kafka молчала {READ_DEADLINE_SEC} с и не вернула маркер: {marker}"
+                )
+            if message.error():
+                raise RuntimeError(f"Kafka вернула ошибку чтения: {message.error()}")
+            if message.value() != marker.encode():
+                raise RuntimeError(
+                    f"по адресу записи лежит не маркер запуска {marker}: "
+                    f"{message.value()!r}"
+                )
         finally:
             consumer.close()
 
