@@ -74,26 +74,31 @@ check_container_health() {
     fi
 }
 
-# Keeper — единственная служба, которой мало быть здоровой: она пишет журнал
-# координации, и если запустить её от root или с чужим каталогом данных, файлы
-# останутся с неверным владельцем и следующий запуск их не откроет. Предел на
-# открытые файлы у неё свой: соединений много, и стандартной тысячи не хватает.
+keeper_exec() {
+    timeout 20s "${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" \
+        exec -T clickhouse-keeper "$@" 2>/dev/null
+}
+
+# Три настройки keeper объявлены в compose.yaml: свой пользователь, свой предел
+# на открытые файлы и свой том под /var/lib/clickhouse. Проверка спрашивает у
+# живого контейнера, дошли ли они до процесса — здоровым keeper выглядит и без
+# них, а каталог координации, однажды созданный от чужого пользователя,
+# следующий запуск уже не откроет.
 check_keeper_runtime() {
-    local keeper_user
     local keeper_nofile
     local keeper_owner
+    local keeper_user
 
-    keeper_user="$(compose exec -T clickhouse-keeper id -un)"
-    keeper_nofile="$(compose exec -T clickhouse-keeper \
+    keeper_user="$(keeper_exec id -un)"
+    keeper_nofile="$(keeper_exec \
         awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4}' /proc/1/limits)"
-    keeper_owner="$(compose exec -T clickhouse-keeper \
-        stat -c '%U:%G' /var/lib/clickhouse/coordination)"
+    keeper_owner="$(keeper_exec stat -c '%U:%G' /var/lib/clickhouse/coordination)"
     if [[ "$keeper_user" == 'clickhouse' ]] && \
         [[ "$keeper_nofile" -ge 262144 ]] && \
         [[ "$keeper_owner" == 'clickhouse:clickhouse' ]]; then
         pass 'keeper работает от clickhouse с nofile 262144 и своим каталогом данных'
     else
-        fail "неверное окружение keeper: пользователь=${keeper_user}, nofile=${keeper_nofile}, владелец каталога=${keeper_owner}"
+        fail "неверное окружение keeper: пользователь=${keeper_user:-нет ответа}, nofile=${keeper_nofile:-нет ответа}, владелец каталога=${keeper_owner:-нет ответа}"
     fi
 }
 

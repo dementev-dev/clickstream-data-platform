@@ -83,8 +83,8 @@ def _drop_tables(client) -> None:
     )
 
 
-# Единственная проверка, вынесенная из задач: её делают обе, до создания таблиц
-# и после уборки.
+# Отсутствие таблиц проверяют обе задачи — перед созданием и после уборки,
+# — поэтому у этой проверки своё имя, а остальные живут прямо в теле задач.
 def _assert_tables_absent(client) -> None:
     for node_name, source in NODES:
         remaining = _table_engines(client, source)
@@ -197,7 +197,8 @@ def test_clickhouse():
                 raise RuntimeError(
                     "запись и чтение маркера должны выполняться с разных нод"
                 )
-            if distributed_rows != [(1, written["hostname"], written["marker"])]:
+            expected_rows = [(1, written["hostname"], written["marker"])]
+            if distributed_rows != expected_rows:
                 raise RuntimeError(
                     "нода 2 не прочитала маркер первого шарда через Distributed: "
                     f"{written['marker']}, получено {distributed_rows}"
