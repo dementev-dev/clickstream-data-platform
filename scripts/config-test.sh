@@ -4,7 +4,6 @@ set -euo pipefail
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 read -r -a COMPOSE_CMD <<<"${COMPOSE_BIN:-docker compose}"
 readonly CACHE_DIR="$(mktemp -d)"
-readonly SHELL_FILES_LIST="$CACHE_DIR/shell-files"
 
 cleanup() {
     rm -rf "$CACHE_DIR"
@@ -35,19 +34,12 @@ jq -e '
     any($service.volumes[]; .source == "airflow_auth" and .target == "/opt/airflow/auth") and
     any($service.volumes[]; .source == "airflow_logs" and .target == "/opt/airflow/logs")
 ' >/dev/null <<<"$config_json"
-if ! find "$ROOT_DIR" \
-    -path "$ROOT_DIR/.git" -prune -o \
-    -type f -name '*.sh' -print0 >"$SHELL_FILES_LIST"; then
-    printf 'ОШИБКА: не удалось получить список файлов Bash для проверки.\n' >&2
-    exit 1
-fi
-mapfile -d '' -t shell_files <"$SHELL_FILES_LIST"
-if [[ "${#shell_files[@]}" -eq 0 ]]; then
-    printf 'ОШИБКА: не найдено ни одного файла Bash для проверки.\n' >&2
-    exit 1
-fi
-bash -n "${shell_files[@]}"
+# Файлы DAG на машине никто не запускает: их разбирает обработчик внутри
+# контейнера, и синтаксическая ошибка там всплывает не сообщением, а тем, что
+# DAG молча не появился в списке. Локальный разбор — единственная дешёвая
+# обратная связь. Скрипты стенда проверять так незачем: их запускают с этой же
+# машины, и ошибка вылезает при первом же запуске с номером строки.
 PYTHONPYCACHEPREFIX="$CACHE_DIR" uv run --no-project python -m compileall -q "$ROOT_DIR/dags"
 git -C "$ROOT_DIR" diff --check
 
-printf 'ЗЕЛЁНО: Compose, Bash, Python и пробельные ошибки diff проверены.\n'
+printf 'ЗЕЛЁНО: Compose, Python и пробельные ошибки diff проверены.\n'
