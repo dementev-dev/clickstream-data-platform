@@ -53,6 +53,30 @@ check_keeper_runtime() {
     fi
 }
 
+# Самая известная поломка Kafka — объявленный адрес не совпадает с тем, по
+# которому к брокеру стучатся снаружи. Выглядит она издевательски: клиент
+# подключается, получает метаданные и виснет на адресе, которого с его стороны
+# не существует. Проверка состояния контейнера этого не увидит — она спрашивает
+# брокер изнутри и по внутреннему слушателю (compose.yaml, healthcheck kafka).
+# Здесь запрос идёт с машины через отображённый порт, и списка топиков клиент не
+# получит, не сходив вторым шагом по объявленному адресу. Отсюда и цена: почти
+# вся она — старт JVM в разовом контейнере, а не разговор с брокером.
+check_kafka_external_listener() {
+    local image
+    local port
+
+    image="$(compose config --format json 2>/dev/null | jq -r '.services.kafka.image // empty')"
+    port="$(published_port kafka 29092)"
+    if [[ -n "$image" ]] && [[ -n "$port" ]] && \
+        timeout 15s docker run --rm --network host "$image" \
+            /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server "localhost:${port}" --list >/dev/null 2>&1; then
+        pass "Kafka отвечает с машины через localhost:${port}: объявленный адрес ведёт туда же, куда отображён порт"
+    else
+        fail "Kafka не ответила с машины через localhost:${port:-порт не найден}: закрыт внешний слушатель, не отображён порт или объявленный адрес ведёт не туда"
+    fi
+}
+
 check_prometheus_targets() {
     local port
     local response
@@ -206,6 +230,7 @@ if require_host_dependencies; then
         check_container_health "$service"
     done
     check_keeper_runtime
+    check_kafka_external_listener
     check_prometheus_targets
     check_grafana_datasource
     check_airflow
