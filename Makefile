@@ -48,7 +48,7 @@ smoke:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-smoke.sh
 
 check-clickhouse:
-	./scripts/clickhouse-smoke.sh
+	./scripts/check-clickhouse.sh
 
 check-services:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-services.sh

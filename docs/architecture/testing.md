@@ -128,11 +128,7 @@ ClickHouse отвечает сразу.
 | `make config-test` | `scripts/config-test.sh` |
 | `make smoke` | `scripts/stand-smoke.sh` |
 | `make check-services` | `scripts/stand-services.sh` |
-| `make check-clickhouse` | `scripts/clickhouse-smoke.sh` |
-
-Имя `clickhouse-smoke.sh` осталось от прежнего имени цели — `smoke-cluster`.
-Файл переименуют при следующем касании: сейчас в него встраивается проверка
-договора со схемой, и переименование устроило бы конфликт на ровном месте.
+| `make check-clickhouse` | `scripts/check-clickhouse.sh` |
 
 Общее у смоука и `check-services` — счёт проверок, обращение к Compose и две
 проверки — вынесено в `scripts/stand-common.sh`; сам он не запускается.
