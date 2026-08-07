@@ -1,6 +1,9 @@
 COMPOSE ?= docker compose
+GENERATOR_DAY ?= 0
+GENERATOR_LIMIT ?=
+GENERATOR_SPEED ?=
 
-.PHONY: up down clean ps logs config-test lint typecheck test docs smoke check-clickhouse check-services
+.PHONY: up down clean ps logs generate-batch generate-live config-test lint typecheck test docs smoke check-clickhouse check-services
 
 up:
 	$(COMPOSE) up --detach --build --wait --wait-timeout 600
@@ -16,6 +19,14 @@ ps:
 
 logs:
 	$(COMPOSE) logs --follow
+
+generate-batch:
+	$(COMPOSE) --profile generator run --rm generator batch --day "$(GENERATOR_DAY)" \
+		$(if $(GENERATOR_LIMIT),--limit "$(GENERATOR_LIMIT)")
+
+generate-live:
+	$(COMPOSE) --profile generator run --rm generator live --day "$(GENERATOR_DAY)" \
+		$(if $(GENERATOR_SPEED),--speed "$(GENERATOR_SPEED)")
 
 config-test:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/config-test.sh

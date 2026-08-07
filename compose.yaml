@@ -194,6 +194,25 @@ services:
           exit 1
         fi
 
+  generator:
+    profiles: ["generator"]
+    build:
+      context: .
+      dockerfile: generator/Dockerfile
+    restart: "no"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      # Адрес брокера и имя топика — факты стенда, и называет их стенд.
+      # Остальное (день, зерно, число дней, предел пачки) приходит аргументами
+      # от того, кто запускает: у службы нет позиции на оси мира.
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-hits}
+    command: ["batch"]
+    # До #42 от этой разовой службы нет зависимого: включать её в обычный
+    # `up --wait` нельзя, иначе успешное завершение будет считаться сбоем.
+
   # DDL применяется с ноды 1 по порядку имён файлов после готовности всего кластера.
   clickhouse-init:
     image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.3.17.56}
