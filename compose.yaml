@@ -52,6 +52,28 @@ x-airflow-common: &airflow-common
     - airflow_logs:/opt/airflow/logs
     - airflow_auth:/opt/airflow/auth
 
+x-generator-common: &generator-common
+  image: clickstream-generator:local
+  build:
+    context: .
+    dockerfile: generator/Dockerfile
+  restart: "no"
+  depends_on:
+    kafka-init:
+      condition: service_completed_successfully
+    # Читать топик движок Kafka начинает не при своём создании, а когда над ним
+    # появляется матвью приёма, и она создаётся последней по номеру файла
+    # (sql/ddl/40-stg-views.sql). Отправь генератор события раньше — они лягут в
+    # топик и молча минуют хранилище.
+    clickhouse-init:
+      condition: service_completed_successfully
+  environment:
+    # Адрес брокера и имя топика — факты стенда, и называет их стенд.
+    # Остальное (день, зерно, число дней, предел пачки) приходит аргументами
+    # от того, кто запускает: у службы нет позиции на оси мира.
+    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+    KAFKA_TOPIC: ${KAFKA_TOPIC:-hits}
+
 x-superset-common: &superset-common
   image: clickstream-superset:local
   build:
@@ -194,25 +216,6 @@ services:
           exit 1
         fi
 
-  generator:
-    profiles: ["generator"]
-    build:
-      context: .
-      dockerfile: generator/Dockerfile
-    restart: "no"
-    depends_on:
-      kafka-init:
-        condition: service_completed_successfully
-    environment:
-      # Адрес брокера и имя топика — факты стенда, и называет их стенд.
-      # Остальное (день, зерно, число дней, предел пачки) приходит аргументами
-      # от того, кто запускает: у службы нет позиции на оси мира.
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
-      KAFKA_TOPIC: ${KAFKA_TOPIC:-hits}
-    command: ["batch"]
-    # До #42 от этой разовой службы нет зависимого: включать её в обычный
-    # `up --wait` нельзя, иначе успешное завершение будет считаться сбоем.
-
   # DDL применяется с ноды 1 по порядку имён файлов после готовности всего кластера.
   clickhouse-init:
     image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.3.17.56}
@@ -243,6 +246,28 @@ services:
         done
     volumes:
       - ./sql/ddl:/ddl:ro
+
+  # Стартовый мир: восемь модельных дней уезжают в топик при каждом подъёме.
+  # Что это за дни и каким мир обязан выйти — data/world-inventory.json.
+  #
+  # Число дней стоит здесь числом: YAML не читает Python, и одно из двух мест
+  # (второе — `STARTING_DAYS` в inventory.py) лишнее по построению. Правя одно,
+  # правьте второе — на страже тут никто не стоит: залей эта служба лишний
+  # день, он лёг бы за рамкой дат описи и остался бы незамеченным.
+  #
+  # Повторный `make up` заливает мир заново, и это не оплошность: `WatchID` у
+  # событий те же, ReplacingMergeTree схлопнет повтор в ODS. Сырьё в STG при
+  # этом честно удвоится — свойство слоя, описанное в storage.md.
+  world-init:
+    <<: *generator-common
+    command: ["batch", "--day", "0", "--days", "8"]
+
+  # Тот же образ для ручных прогонов: `make generate-batch`, `make generate-live`.
+  # Под профилем — чтобы обычный подъём стенда её не трогал.
+  generator:
+    <<: *generator-common
+    profiles: ["generator"]
+    command: ["batch"]
 
   postgres-metadata:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
@@ -284,6 +309,11 @@ services:
       # Не убирать: без зависимого успешный clickhouse-init считается
       # упавшим для --wait.
       clickhouse-init:
+        condition: service_completed_successfully
+      # По той же причине. Заливка стартового мира идёт последней в цепи
+      # разовых служб, и зависимого ей взять больше негде: долгоживущие службы
+      # данных не ждут, а `airflow-init` эту цепь и так замыкает.
+      world-init:
         condition: service_completed_successfully
     entrypoint: ["/bin/bash"]
     command: ["/opt/airflow/init.sh"]

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly INVENTORY="${ROOT_DIR}/data/world-inventory.json"
 readonly CLUSTER="clickstream_cluster"
 readonly LOCAL_TABLE="smoke_replicated_local"
 readonly DISTRIBUTED_TABLE="smoke_distributed"
@@ -76,6 +77,63 @@ on_signal() {
     exit 130
 }
 
+# Единственный постоянный сторож цепочки Kafka → STG → ODS.
+#
+# Проверка спрашивает не «есть ли данные», а «те ли это данные»: подневный счёт
+# в `ods.event` против описи мира, лежащей в git. Поэтому она умеет краснеть на
+# сломанном разборе — уехали события в брак, счёт разошёлся, — и на потере по
+# дороге, а не только на пустой таблице.
+#
+# **Счёт обрамлён датами стартового мира.** Мир растёт: менти переиграет день,
+# этап 5 добавит следующий, — и голый счёт по таблице разойдётся с описью
+# законно, без всякой поломки.
+#
+# **Счёт идёт через FINAL** — правило репозитория для ODS, довод в storage.md:
+# голый `count()` по ReplacingMergeTree зависит от числа прошедших мержей.
+#
+# Таблица брака здесь не второе утверждение, а объяснение первого. Утверждай мы
+# «брака нет», проверка краснела бы навсегда после первого же урока, где менти
+# нарочно отправил в топик мусор, — и краснела бы не о том.
+#
+# По той же причине непустой брак сам по себе ничего не доказывает: модельного
+# дня у брака нет, обрамить его нечем, и строки прежних уроков лежат в нём
+# месяц. Поэтому объяснение не утверждает причину, а даёт признак, по которому
+# её отличают: сошлась недостача с числом брака — разбор, не сошлась — доставка.
+check_starting_world() {
+    local expected actual broken first_date last_date
+
+    expected="$(jq -r '.days[] | "\(.date)\t\(.events)"' "$INVENTORY")"
+    first_date="$(jq -r '.days | first | .date' "$INVENTORY")"
+    last_date="$(jq -r '.days | last | .date' "$INVENTORY")"
+
+    actual="$(query clickhouse-01 "
+        SELECT EventDate, count()
+        FROM ods.event_dist FINAL
+        WHERE EventDate BETWEEN '${first_date}' AND '${last_date}'
+        GROUP BY EventDate
+        ORDER BY EventDate
+        FORMAT TSV")"
+
+    if [[ "$actual" == "$expected" ]]; then
+        printf 'ЗЕЛЁНО: события всех дней стартового мира на месте, счёт сходится с описью.\n'
+        return
+    fi
+
+    broken="$(query clickhouse-01 "
+        SELECT error_class, count()
+        FROM ods.event_errors_dist
+        GROUP BY error_class
+        ORDER BY count() DESC
+        FORMAT TSV")"
+    printf 'Опись мира ожидает (дата, событий):\n%s\n' "$expected" >&2
+    printf 'В ods.event лежит:\n%s\n' "${actual:-— ничего —}" >&2
+    if [[ -z "$broken" ]]; then
+        fail 'счёт разошёлся с описью, а таблица брака пуста: события не доехали до ODS — начните с чтеца топика stg.hits_raw_kafka и матвью приёма stg.hits_raw_mv'
+    fi
+    printf 'В ods.event_errors по классам брака:\n%s\n' "$broken" >&2
+    fail 'счёт разошёлся с описью, и в таблице брака есть строки. Сойдётся недостача с их числом — сломан разбор, смотрите матвью ods.event_mv; не сойдётся — брак остался от прежних опытов, а события не доехали: смотрите чтеца топика stg.hits_raw_kafka'
+}
+
 assert_ddl_queue_completed() {
     local service="$1"
     local phase="$2"
@@ -93,7 +151,7 @@ ensure_stand_running
 trap on_exit EXIT
 trap on_signal INT TERM
 
-printf 'Проверка 1/8: описание кластера одинаково на обеих нодах...\n'
+printf 'Проверка 1/9: описание кластера одинаково на обеих нодах...\n'
 cluster_sql="SELECT cluster, shard_num, replica_num, host_name, port FROM system.clusters WHERE cluster = '${CLUSTER}' ORDER BY shard_num, replica_num FORMAT TSV"
 cluster_01="$(query clickhouse-01 "$cluster_sql")"
 cluster_02="$(query clickhouse-02 "$cluster_sql")"
@@ -102,7 +160,7 @@ assert_equal "$expected_cluster" "$cluster_01" "неверная тополог�
 assert_equal "$expected_cluster" "$cluster_02" "неверная топология на второй ноде"
 printf 'ЗЕЛЁНО: обе ноды видят ожидаемые два шарда: clickhouse-01 и clickhouse-02.\n'
 
-printf 'Проверка 2/8: у нод разные макросы shard и replica...\n'
+printf 'Проверка 2/9: у нод разные макросы shard и replica...\n'
 macros_sql="SELECT macro, substitution FROM system.macros WHERE macro IN ('shard', 'replica') ORDER BY macro FORMAT TSV"
 macros_01="$(query clickhouse-01 "$macros_sql")"
 macros_02="$(query clickhouse-02 "$macros_sql")"
@@ -111,14 +169,14 @@ assert_equal $'replica\tclickhouse-02\nshard\t02' "$macros_02" "неверные
 [[ "$macros_01" != "$macros_02" ]] || fail "макросы нод не должны совпадать"
 printf 'ЗЕЛЁНО: clickhouse-01=(shard 01, replica clickhouse-01), clickhouse-02=(shard 02, replica clickhouse-02).\n'
 
-printf 'Проверка 3/8: keeper отвечает обеим нодам...\n'
+printf 'Проверка 3/9: keeper отвечает обеим нодам...\n'
 query clickhouse-01 "SELECT name FROM system.zookeeper WHERE path = '/' ORDER BY name FORMAT Null"
 query clickhouse-02 "SELECT name FROM system.zookeeper WHERE path = '/' ORDER BY name FORMAT Null"
 printf 'ЗЕЛЁНО: system.zookeeper доступна с обеих нод.\n'
 
 cleanup_tables || fail "не удалось очистить объекты предыдущего запуска"
 
-printf 'Проверка 4/8: ReplicatedMergeTree создаётся через ON CLUSTER...\n'
+printf 'Проверка 4/9: ReplicatedMergeTree создаётся через ON CLUSTER...\n'
 query clickhouse-01 "
     CREATE TABLE default.${LOCAL_TABLE} ON CLUSTER ${CLUSTER}
     (
@@ -136,13 +194,13 @@ assert_equal $'smoke_replicated_local\tReplicatedMergeTree' "$(query clickhouse-
 assert_equal $'smoke_replicated_local\tReplicatedMergeTree' "$(query clickhouse-02 "$tables_sql")" "локальная таблица не создана на второй ноде"
 printf 'ЗЕЛЁНО: ReplicatedMergeTree видна в system.tables на обеих нодах.\n'
 
-printf 'Проверка 5/8: путь в keeper собран из макроса shard...\n'
+printf 'Проверка 5/9: путь в keeper собран из макроса shard...\n'
 path_sql="SELECT zookeeper_path, replica_name FROM system.replicas WHERE database = 'default' AND table = '${LOCAL_TABLE}' FORMAT TSV"
 assert_equal "/clickhouse/tables/01/${LOCAL_TABLE}"$'\t'"clickhouse-01" "$(query clickhouse-01 "$path_sql")" "неверные путь или имя реплики на первой ноде"
 assert_equal "/clickhouse/tables/02/${LOCAL_TABLE}"$'\t'"clickhouse-02" "$(query clickhouse-02 "$path_sql")" "неверные путь или имя реплики на второй ноде"
 printf 'ЗЕЛЁНО: пути собраны из shard (/01/ и /02/), имя реплики собрано из макроса replica.\n'
 
-printf 'Проверка 6/8: Distributed создаётся ON CLUSTER и передаёт данные между нодами...\n'
+printf 'Проверка 6/9: Distributed создаётся ON CLUSTER и передаёт данные между нодами...\n'
 query clickhouse-01 "
     CREATE TABLE default.${DISTRIBUTED_TABLE} ON CLUSTER ${CLUSTER}
     AS default.${LOCAL_TABLE}
@@ -164,12 +222,12 @@ sharding_sql="SELECT countIf(_shard_num != cityHash64(ClientID) % 2 + 1), uniqEx
 assert_equal $'0\t2' "$(query clickhouse-02 "$sharding_sql")" "Distributed использует неверный ключ шардирования"
 printf 'ЗЕЛЁНО: локальная строка первой ноды читается со второй; ключ cityHash64(ClientID) разложил строки по двум шардам.\n'
 
-printf 'Проверка 7/8: в очереди распределённых DDL нет незавершённых заданий...\n'
+printf 'Проверка 7/9: в очереди распределённых DDL нет незавершённых заданий...\n'
 assert_ddl_queue_completed clickhouse-01 'после CREATE'
 assert_ddl_queue_completed clickhouse-02 'после CREATE'
 printf 'ЗЕЛЁНО: очередь содержит задания CREATE, незавершённых среди них нет.\n'
 
-printf 'Проверка 8/8: временные таблицы удаляются через ON CLUSTER...\n'
+printf 'Проверка 8/9: временные таблицы удаляются через ON CLUSTER...\n'
 query clickhouse-01 "DROP TABLE default.${DISTRIBUTED_TABLE} ON CLUSTER ${CLUSTER} SYNC" >/dev/null
 query clickhouse-01 "DROP TABLE default.${LOCAL_TABLE} ON CLUSTER ${CLUSTER} SYNC" >/dev/null
 remaining_sql="SELECT count() FROM system.tables WHERE database = 'default' AND name IN ('${LOCAL_TABLE}', '${DISTRIBUTED_TABLE}') FORMAT TSVRaw"
@@ -179,4 +237,10 @@ assert_ddl_queue_completed clickhouse-01 'после DROP'
 assert_ddl_queue_completed clickhouse-02 'после DROP'
 trap - EXIT INT TERM
 printf 'ЗЕЛЁНО: временные таблицы удалены; проверены завершённые задания CREATE и DROP.\n'
-printf 'ИТОГ: все 8 проверок кластера ClickHouse прошли.\n'
+
+# После снятия ловушек: своих объектов эта проверка не заводит и прибирать за
+# собой ей нечего — она только смотрит на то, что стенд произвёл сам.
+printf 'Проверка 9/9: стартовый мир в ods.event сходится с описью...\n'
+check_starting_world
+
+printf 'ИТОГ: все 9 проверок кластера ClickHouse прошли.\n'
