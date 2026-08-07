@@ -3,10 +3,13 @@ GENERATOR_DAY ?= 0
 GENERATOR_LIMIT ?=
 GENERATOR_SPEED ?=
 
-.PHONY: up down clean ps logs generate-batch generate-live config-test lint typecheck test docs smoke check-clickhouse check-services
+.PHONY: up down clean ps logs generate-batch generate-live config-test lint typecheck test docs inventory smoke check-clickhouse check-services
 
+# Второй шаг: `--wait` дожидается служб, а приём событий асинхронный — довод
+# целиком в шапке скрипта.
 up:
 	$(COMPOSE) up --detach --build --wait --wait-timeout 600
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/wait-for-world.sh
 
 down:
 	$(COMPOSE) down --remove-orphans
@@ -43,6 +46,10 @@ test:
 docs:
 	cd generator && uv run python -m clickstream_generator.schema_doc \
 		../docs/formats/clickstream-event.md
+
+inventory:
+	cd generator && uv run python -m clickstream_generator.inventory \
+		../data/world-inventory.json
 
 smoke:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-smoke.sh

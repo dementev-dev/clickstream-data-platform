@@ -1,0 +1,55 @@
+{
+  "seed": 20260601,
+  "generator_version": "0.1.0",
+  "catalog_sha256": "4fffceb3ec278c0b364ec84d936d991946ddd2a0912ed9c36471ff7a55c7483f",
+  "days": [
+    {
+      "day": 0,
+      "date": "2026-06-01",
+      "events": 50626,
+      "sha256": "81ad7f402bdd4c8b56425f6439a024b9996e5ca95dd207d444290d20a70ed407"
+    },
+    {
+      "day": 1,
+      "date": "2026-06-02",
+      "events": 49722,
+      "sha256": "5f7aa0301832008db612eff05899b1210af958c888ac2e9e89f4b7a552569eff"
+    },
+    {
+      "day": 2,
+      "date": "2026-06-03",
+      "events": 52361,
+      "sha256": "10ac9ce65ca6dc171689edf78ef5cd785e8c8a80e54d236bf2b9d6dbf6997070"
+    },
+    {
+      "day": 3,
+      "date": "2026-06-04",
+      "events": 53157,
+      "sha256": "7bf4deadd8f69a6c479fceabfe2d1e8ea8db76919b10a8b9e780006708da31c3"
+    },
+    {
+      "day": 4,
+      "date": "2026-06-05",
+      "events": 50078,
+      "sha256": "b9e758fb72f937aa5ad1f2e90dee5ec147b16cfd89e49e51a00582f909458c29"
+    },
+    {
+      "day": 5,
+      "date": "2026-06-06",
+      "events": 47164,
+      "sha256": "f08a9f9a439f1da9e4ad8d94b9f65b7f3329256e41446d22d900cc4825f2480c"
+    },
+    {
+      "day": 6,
+      "date": "2026-06-07",
+      "events": 48683,
+      "sha256": "7e45d9dd59c902067fa6847d813669b1ab9a4ee88d2f192382577a5ed8d590a7"
+    },
+    {
+      "day": 7,
+      "date": "2026-06-08",
+      "events": 49394,
+      "sha256": "286ccc2451847ac8de215b5e902c328371021ad5502bd4afca0494b6f313aef7"
+    }
+  ]
+}
