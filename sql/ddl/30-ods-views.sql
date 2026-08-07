@@ -37,13 +37,23 @@
 -- семь CamelCase-имён пришлось бы держать ровно в байтовом порядке, а сбой
 -- порядка увёл бы в брак вообще всё, и молча (ADR 0005).
 --
--- Метку времени разбирает не JSONExtract, а parseDateTimeBestEffortOrNull, и
--- это измеренная необходимость, а не вкус. На проводе UTCEventTime уезжает в
+-- Метка времени — единственная из пяти, кого разбирает не JSONExtract, и это
+-- измеренная необходимость, а не вкус. На проводе UTCEventTime уезжает в
 -- ISO-8601 с суффиксом зоны — «2026-06-01T12:34:56Z» (спека генератора,
 -- раздел 4), а JSONExtract с типом DateTime такую строку не берёт и отдаёт
--- NULL. Оставь его здесь — и в брак уехали бы все события до единого. Замер и
--- его подробности — ADR 0005, «Что проверено». EventDate в такой подпорке не
--- нуждается: дата уезжает как «2026-06-01», и JSONExtract её берёт.
+-- NULL. Оставь его здесь — и в брак уехали бы все события до единого.
+--
+-- Формат назван буквально, а не отдан parseDateTimeBestEffort, и вот почему.
+-- Best-effort понимает десяток записей и на непонятной не краснеет, а
+-- достраивает недостающее: обрезанное «20:00:21» он превращает в первое
+-- января текущего года. Такая строка прошла бы строгий приём с тихо неверным
+-- временем — ровно с той порчей, ради которой класс key_field_unparsed и
+-- заведён. Источник у топика один и шлёт одну запись, так что широта здесь не
+-- нужна вовсе, а стоит она отключённой проверкой. Замеры — ADR 0005,
+-- «Что проверено».
+--
+-- EventDate в такой подпорке не нуждается: дата уезжает как «2026-06-01», и
+-- JSONExtract её берёт.
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS ods.event_mv ON CLUSTER clickstream_cluster
 TO ods.event_dist
@@ -68,16 +78,17 @@ WITH
         AND JSONExtract(raw, 'VisitID', 'Nullable(UInt64)') IS NOT NULL
         AND JSONExtract(raw, 'ClientID', 'Nullable(UInt64)') IS NOT NULL
         AND JSONExtract(raw, 'EventDate', 'Nullable(Date)') IS NOT NULL
-        AND parseDateTimeBestEffortOrNull(JSONExtractString(raw, 'UTCEventTime'))
-            IS NOT NULL AS key_fields_parsed
+        AND parseDateTimeOrNull(JSONExtractString(raw, 'UTCEventTime'),
+            '%Y-%m-%dT%H:%i:%SZ') IS NOT NULL AS key_fields_parsed
 SELECT
     JSONExtract(raw, 'WatchID', 'UInt64') AS WatchID,
     JSONExtract(raw, 'VisitID', 'UInt64') AS VisitID,
     JSONExtract(raw, 'ClientID', 'UInt64') AS ClientID,
     JSONExtract(raw, 'CounterID', 'UInt32') AS CounterID,
     JSONExtract(raw, 'EventDate', 'Date') AS EventDate,
-    assumeNotNull(parseDateTimeBestEffortOrNull(
-        JSONExtractString(raw, 'UTCEventTime'))) AS UTCEventTime,
+    assumeNotNull(parseDateTimeOrNull(
+        JSONExtractString(raw, 'UTCEventTime'),
+        '%Y-%m-%dT%H:%i:%SZ')) AS UTCEventTime,
     JSONExtract(raw, 'ClientTimeZone', 'Int16') AS ClientTimeZone,
     JSONExtract(raw, 'EventType', 'String') AS EventType,
     JSONExtract(raw, 'Sign', 'Int8') AS Sign,
@@ -161,8 +172,8 @@ WITH
         AND JSONExtract(raw, 'VisitID', 'Nullable(UInt64)') IS NOT NULL
         AND JSONExtract(raw, 'ClientID', 'Nullable(UInt64)') IS NOT NULL
         AND JSONExtract(raw, 'EventDate', 'Nullable(Date)') IS NOT NULL
-        AND parseDateTimeBestEffortOrNull(JSONExtractString(raw, 'UTCEventTime'))
-            IS NOT NULL AS key_fields_parsed
+        AND parseDateTimeOrNull(JSONExtractString(raw, 'UTCEventTime'),
+            '%Y-%m-%dT%H:%i:%SZ') IS NOT NULL AS key_fields_parsed
 SELECT
     raw,
     multiIf(
