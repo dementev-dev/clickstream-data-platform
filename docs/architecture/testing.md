@@ -22,10 +22,10 @@
 макросов `shard`: обе ноды здоровы и порты отвечают. `make check-clickhouse` не
 заметит потерянного подключения Superset: он про ClickHouse и только.
 
-Отсюда правило для новой проверки: **спроси, кого она спрашивает.** Договор со
-схемой событий — вопрос к ClickHouse, значит дом ему в `check-clickhouse`, даже
-если по цене он подошёл бы смоуку. Счётчики против манифеста — тоже вопрос к
-ClickHouse: строки в `ods.event` считает сам сервер и отвечает сразу.
+Отсюда правило для новой проверки: **спроси, кого она спрашивает.** Счётчики
+против манифеста — вопрос к ClickHouse: строки в `ods.event` считает сам
+сервер и отвечает сразу, значит дом им в `check-clickhouse`, даже если по цене
+они подошли бы смоуку.
 
 ## Карта целей
 
@@ -128,11 +128,7 @@ ClickHouse отвечает сразу.
 | `make config-test` | `scripts/config-test.sh` |
 | `make smoke` | `scripts/stand-smoke.sh` |
 | `make check-services` | `scripts/stand-services.sh` |
-| `make check-clickhouse` | `scripts/clickhouse-smoke.sh` |
-
-Имя `clickhouse-smoke.sh` осталось от прежнего имени цели — `smoke-cluster`.
-Файл переименуют при следующем касании: сейчас в него встраивается проверка
-договора со схемой, и переименование устроило бы конфликт на ровном месте.
+| `make check-clickhouse` | `scripts/check-clickhouse.sh` |
 
 Общее у смоука и `check-services` — счёт проверок, обращение к Compose и две
 проверки — вынесено в `scripts/stand-common.sh`; сам он не запускается.
