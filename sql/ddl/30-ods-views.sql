@@ -52,6 +52,12 @@
 -- нужна вовсе, а стоит она отключённой проверкой. Замеры — ADR 0005,
 -- «Что проверено».
 --
+-- Третьим аргументом назван пояс — 'UTC'. Суффикс Z маска сверяет как букву и
+-- выбрасывает, зоны из строки не берёт вовсе, поэтому без имени функция читала
+-- бы показания часов по поясу сессии, а тот по умолчанию серверный. Тип
+-- колонки этого не чинит: он про то, как число покажут, а не какое ляжет.
+-- Правило и замер — docs/architecture/storage.md, «Часовые пояса».
+--
 -- EventDate в такой подпорке не нуждается: дата уезжает как «2026-06-01», и
 -- JSONExtract её берёт.
 
@@ -79,7 +85,7 @@ WITH
         AND JSONExtract(raw, 'ClientID', 'Nullable(UInt64)') IS NOT NULL
         AND JSONExtract(raw, 'EventDate', 'Nullable(Date)') IS NOT NULL
         AND parseDateTimeOrNull(JSONExtractString(raw, 'UTCEventTime'),
-            '%Y-%m-%dT%H:%i:%SZ') IS NOT NULL AS key_fields_parsed
+            '%Y-%m-%dT%H:%i:%SZ', 'UTC') IS NOT NULL AS key_fields_parsed
 SELECT
     JSONExtract(raw, 'WatchID', 'UInt64') AS WatchID,
     JSONExtract(raw, 'VisitID', 'UInt64') AS VisitID,
@@ -88,7 +94,7 @@ SELECT
     JSONExtract(raw, 'EventDate', 'Date') AS EventDate,
     assumeNotNull(parseDateTimeOrNull(
         JSONExtractString(raw, 'UTCEventTime'),
-        '%Y-%m-%dT%H:%i:%SZ')) AS UTCEventTime,
+        '%Y-%m-%dT%H:%i:%SZ', 'UTC')) AS UTCEventTime,
     JSONExtract(raw, 'ClientTimeZone', 'Int16') AS ClientTimeZone,
     JSONExtract(raw, 'EventType', 'String') AS EventType,
     JSONExtract(raw, 'Sign', 'Int8') AS Sign,
@@ -173,7 +179,7 @@ WITH
         AND JSONExtract(raw, 'ClientID', 'Nullable(UInt64)') IS NOT NULL
         AND JSONExtract(raw, 'EventDate', 'Nullable(Date)') IS NOT NULL
         AND parseDateTimeOrNull(JSONExtractString(raw, 'UTCEventTime'),
-            '%Y-%m-%dT%H:%i:%SZ') IS NOT NULL AS key_fields_parsed
+            '%Y-%m-%dT%H:%i:%SZ', 'UTC') IS NOT NULL AS key_fields_parsed
 SELECT
     raw,
     multiIf(

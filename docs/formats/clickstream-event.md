@@ -38,7 +38,7 @@
 | 3 | `ClientID` | `UInt64` | `uint64` | `client_id` | анонимный id браузера — кука; по хешу от неё таблица шардируется |
 | 4 | `CounterID` | `UInt32` | `uint32` | `counter_id` | id счётчика: на стенде константа, сайт один |
 | 5 | `EventDate` | `Date` | `datetime64[D]` | `event_date` | дата события в часовом поясе счётчика; по ней режется партиция. Дату из `UTCEventTime` не выводить: у ночных событий она на сутки другая |
-| 6 | `UTCEventTime` | `DateTime` | `datetime64[s]` | `utc_event_time` | время события в UTC — единственная метка времени, как у Метрики; сутки же считаются в поясе счётчика, поэтому `toDate(UTCEventTime)` ≠ `EventDate` |
+| 6 | `UTCEventTime` | `DateTime('UTC')` | `datetime64[s]` | `utc_event_time` | время события в UTC — единственная метка времени, как у Метрики; сутки же считаются в поясе счётчика, поэтому `toDate(UTCEventTime)` ≠ `EventDate` |
 | 7 | `ClientTimeZone` | `Int16` | `int16` | `client_timezone` | смещение часового пояса клиента от UTC, в минутах |
 | 8 | `EventType` | `LowCardinality(String)` | `object` | `event_type` | тип события: pageview, add_to_cart, purchase — добавка стенда, у Метрики такого поля нет |
 | 9 | `Sign` | `Int8` | `int8` | `sign` | всегда 1: колонка формата, исправлений записей генератор не шлёт |

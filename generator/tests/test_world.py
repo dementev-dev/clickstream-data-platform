@@ -6,6 +6,9 @@
 «в среднем 3–4 возврата» и «средняя кука активна ≈1,9 дня».
 """
 
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
 from clickstream_generator import catalog, world
 
 
@@ -25,6 +28,13 @@ def active_days(one_shot_percent: int, return_weights: tuple[int, ...]) -> float
 def test_origin_is_a_monday():
     """День недели считается как остаток номера дня — это верно от понедельника."""
     assert world.ORIGIN.weekday() == 0
+
+
+def test_the_counter_timezone_name_and_offset_say_the_same_thing():
+    """Имя пояса просит хранилище, минуты — генератор; расходиться им нельзя."""
+    midnight = datetime.combine(world.ORIGIN, time())
+    named = ZoneInfo(world.COUNTER_TIMEZONE).utcoffset(midnight)
+    assert named == timedelta(minutes=world.COUNTER_TIMEZONE_MINUTES)
 
 
 def test_weekly_profile_covers_a_week_and_averages_to_one():
