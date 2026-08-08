@@ -31,7 +31,7 @@ NUMPY_BY_CLICKHOUSE_TYPE = {
     "String": "object",
     "LowCardinality(String)": "object",
     "Date": "datetime64[D]",
-    "DateTime": "datetime64[s]",
+    "DateTime('UTC')": "datetime64[s]",
 }
 
 METRICA_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")

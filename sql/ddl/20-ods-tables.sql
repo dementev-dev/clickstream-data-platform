@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS ods.event_rep ON CLUSTER clickstream_cluster
     ClientID UInt64,
     CounterID UInt32,
     EventDate Date,
-    UTCEventTime DateTime,
+    UTCEventTime DateTime('UTC'),
     ClientTimeZone Int16,
     EventType LowCardinality(String),
     Sign Int8,
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS ods.event_rep ON CLUSTER clickstream_cluster
     productQuantity Array(UInt64),
     productEventType Array(String),
     ecommerce String,
-    _load_ts DateTime64(3)
+    _load_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}', _load_ts)
 PARTITION BY EventDate
@@ -137,9 +137,9 @@ CREATE TABLE IF NOT EXISTS ods.event_errors_rep ON CLUSTER clickstream_cluster
     kafka_topic LowCardinality(String),
     kafka_partition UInt64,
     kafka_offset UInt64,
-    kafka_timestamp Nullable(DateTime64(3)),
+    kafka_timestamp Nullable(DateTime64(3, 'UTC')),
     consumer_host LowCardinality(String),
-    _load_ts DateTime64(3)
+    _load_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
 PARTITION BY toDate(_load_ts)

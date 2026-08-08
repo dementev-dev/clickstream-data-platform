@@ -107,7 +107,7 @@ COLUMNS: tuple[Column, ...] = (
     ),
     Column(
         name="UTCEventTime",
-        clickhouse_type="DateTime",
+        clickhouse_type="DateTime('UTC')",
         numpy_dtype="datetime64[s]",
         normalized_name="utc_event_time",
         group=ColumnGroup.IDENTIFIERS,

@@ -41,13 +41,19 @@ SETTINGS
 -- виртуальные колонки его не несут, а после записи в Distributed он уже
 -- невосстановим.
 --
--- kafka_timestamp — Nullable(DateTime64(3)), и заполняется из виртуальной
+-- kafka_timestamp — Nullable(DateTime64(3, 'UTC')), и заполняется из виртуальной
 -- колонки _timestamp_ms, а не из _timestamp. Измерено на стенде 5 августа
 -- 2026 года: _timestamp — Nullable(DateTime), то есть секунды; _timestamp_ms —
 -- Nullable(DateTime64(3)). Взяты миллисекунды: у брокера метка миллисекундная,
--- _load_ts рядом тоже DateTime64(3), а слой сырья хранит то, что приехало, и
+-- _load_ts рядом тоже миллисекундная, а слой сырья хранит то, что приехало, и
 -- округлять ему нечего. Обнуляемость обязательна: метку брокер заполняет не
 -- всегда, а необнуляемый тип дал бы либо падение приёма, либо тихий 1970 год.
+--
+-- Пояс у обеих меток написан в типе. Хранимого числа он не меняет, а решает,
+-- в какие сутки метка попадёт, — то есть чем окажется toDate(_load_ts) в ключе
+-- партиции ниже. Не напиши его — пояс возьмётся у сервера, а это умолчание в
+-- коде не видно. Правило целиком — docs/architecture/storage.md, «Часовые
+-- пояса».
 --
 -- Нарезка и срок жизни — по _load_ts, то есть по реальному времени загрузки:
 -- модельный день события живёт в ODS, а по нему TTL был бы просто сломан.
@@ -64,9 +70,9 @@ CREATE TABLE IF NOT EXISTS stg.hits_raw_rep ON CLUSTER clickstream_cluster
     kafka_topic LowCardinality(String),
     kafka_partition UInt64,
     kafka_offset UInt64,
-    kafka_timestamp Nullable(DateTime64(3)),
+    kafka_timestamp Nullable(DateTime64(3, 'UTC')),
     consumer_host LowCardinality(String),
-    _load_ts DateTime64(3)
+    _load_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
 PARTITION BY toDate(_load_ts)

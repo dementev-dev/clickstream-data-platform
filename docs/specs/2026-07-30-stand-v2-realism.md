@@ -99,7 +99,7 @@
 | `ClientID` | UInt64 | анонимный id браузера (кука) — ключ шардирования |
 | `CounterID` | UInt32 | константа стенда (один сайт) |
 | `EventDate` | Date | дата события |
-| `UTCEventTime` | DateTime | единственная метка времени, как у Метрики |
+| `UTCEventTime` | DateTime('UTC') | единственная метка времени, как у Метрики |
 | `ClientTimeZone` | Int16 | смещение пояса клиента в минутах |
 | `EventType` | LowCardinality(String) | `pageview` / `add_to_cart` / `purchase` |
 | `Sign` | Int8 | всегда 1: колонка формата, механика исправлений не реализована (см. 1.1) |
