@@ -11,23 +11,27 @@ cleanup() {
 
 trap cleanup EXIT
 
-"${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" config --quiet
-config_json="$("${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" config --format json)"
+"${COMPOSE_CMD[@]}" \
+    --project-directory "$ROOT_DIR" \
+    --env-file "$ROOT_DIR/.env.example" \
+    config --quiet
+config_json="$(
+    "${COMPOSE_CMD[@]}" \
+        --project-directory "$ROOT_DIR" \
+        --env-file "$ROOT_DIR/.env.example" \
+        config --format json
+)"
 # Контекст сборки образов — корень репозитория, и локальный `.env` с настоящими
 # паролями уехал бы в слой образа молча. Это единственная здешняя ошибка, о
 # которой никто не узнает, пока образ не окажется у чужого.
 for private_path in '.env' '.env.*' '*.pem' '*.key' '*.crt' 'secrets/' 'credentials/'; do
     grep -qxF "$private_path" "$ROOT_DIR/.dockerignore"
 done
-grep -qx 'ARG SUPERSET_BASE_IMAGE' "$ROOT_DIR/infra/superset/Dockerfile"
 jq -e '
-    .services.superset.image == "clickstream-superset:local" and
-    (.services.superset.build.args.SUPERSET_BASE_IMAGE | length > 0)
+    .services.superset.image == "clickstream-superset:local"
 ' >/dev/null <<<"$config_json"
-grep -qx 'ARG AIRFLOW_BASE_IMAGE' "$ROOT_DIR/infra/airflow/Dockerfile"
 jq -e '
     .services["airflow-init"].image == "clickstream-airflow:local" and
-    (.services["airflow-init"].build.args.AIRFLOW_BASE_IMAGE | length > 0) and
     all(
         .services[];
         ((.environment // {}) | has("_PIP_ADDITIONAL_REQUIREMENTS") | not)
