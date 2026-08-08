@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-clickstream-data-platform}
+name: ${COMPOSE_PROJECT_NAME:?Скопируйте .env.example в .env}
 
 x-clickhouse-nofile: &clickhouse-nofile
   nofile:
@@ -6,7 +6,7 @@ x-clickhouse-nofile: &clickhouse-nofile
     hard: 262144
 
 x-clickhouse-common: &clickhouse-common
-  image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.3.17.56}
+  image: clickhouse/clickhouse-server:26.3.17.56
   restart: unless-stopped
   environment:
     # Стенд локальный: нодам нужен общий пользователь без пароля для Distributed.
@@ -28,24 +28,22 @@ x-airflow-common: &airflow-common
   image: clickstream-airflow:local
   build:
     context: ./infra/airflow
-    args:
-      AIRFLOW_BASE_IMAGE: ${AIRFLOW_IMAGE:-apache/airflow:3.3.0}
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__PARALLELISM: "4"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_ADMIN_USER:-admin}:admin"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_ADMIN_USER:?Скопируйте .env.example в .env}:admin"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local-only-airflow-jwt-secret-do-not-use}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Скопируйте .env.example в .env}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?Скопируйте .env.example в .env}
     AIRFLOW__API_AUTH__JWT_ISSUER: airflow
-    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:-local-only-airflow-api-secret-do-not-use}
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://${AIRFLOW_METADATA_USER:-airflow}:${AIRFLOW_METADATA_PASSWORD:-airflow-local}@postgres-metadata:5432/airflow"
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?Скопируйте .env.example в .env}
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://${AIRFLOW_METADATA_USER:?Скопируйте .env.example в .env}:${AIRFLOW_METADATA_PASSWORD:?Скопируйте .env.example в .env}@postgres-metadata:5432/airflow"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
-    AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
-    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+    AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:?Скопируйте .env.example в .env}
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
@@ -71,21 +69,19 @@ x-generator-common: &generator-common
     # Адрес брокера и имя топика — факты стенда, и называет их стенд.
     # Остальное (день, зерно, число дней, предел пачки) приходит аргументами
     # от того, кто запускает: у службы нет позиции на оси мира.
-    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
-    KAFKA_TOPIC: ${KAFKA_TOPIC:-hits}
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    KAFKA_TOPIC: hits
 
 x-superset-common: &superset-common
   image: clickstream-superset:local
   build:
     context: ./infra/superset
-    args:
-      SUPERSET_BASE_IMAGE: ${SUPERSET_IMAGE:-apache/superset:6.1.0}
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
-    SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-only-superset-secret-do-not-use-outside-this-stand}
-    SUPERSET__SQLALCHEMY_DATABASE_URI: "postgresql+psycopg2://${SUPERSET_METADATA_USER:-superset}:${SUPERSET_METADATA_PASSWORD:-superset-local}@postgres-metadata:5432/superset"
-    SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
-    SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-superset}
+    SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?Скопируйте .env.example в .env}
+    SUPERSET__SQLALCHEMY_DATABASE_URI: "postgresql+psycopg2://${SUPERSET_METADATA_USER:?Скопируйте .env.example в .env}:${SUPERSET_METADATA_PASSWORD:?Скопируйте .env.example в .env}@postgres-metadata:5432/superset"
+    SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:?Скопируйте .env.example в .env}
+    SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
   volumes:
     - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     - ./infra/superset/init.sh:/app/infra/init.sh:ro
@@ -94,7 +90,7 @@ x-superset-common: &superset-common
 
 services:
   clickhouse-keeper:
-    image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.3.17.56}
+    image: clickhouse/clickhouse-server:26.3.17.56
     restart: unless-stopped
     user: clickhouse
     ulimits: *clickhouse-nofile
@@ -118,8 +114,8 @@ services:
     <<: *clickhouse-common
     hostname: clickhouse-01
     ports:
-      - "127.0.0.1:${CLICKHOUSE_01_HTTP_PORT:-28123}:8123"
-      - "127.0.0.1:${CLICKHOUSE_01_TCP_PORT:-29000}:9000"
+      - "127.0.0.1:${CLICKHOUSE_01_HTTP_PORT:?Скопируйте .env.example в .env}:8123"
+      - "127.0.0.1:${CLICKHOUSE_01_TCP_PORT:?Скопируйте .env.example в .env}:9000"
     volumes:
       - ./infra/clickhouse/config.d/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
@@ -131,8 +127,8 @@ services:
     <<: *clickhouse-common
     hostname: clickhouse-02
     ports:
-      - "127.0.0.1:${CLICKHOUSE_02_HTTP_PORT:-28124}:8123"
-      - "127.0.0.1:${CLICKHOUSE_02_TCP_PORT:-29001}:9000"
+      - "127.0.0.1:${CLICKHOUSE_02_HTTP_PORT:?Скопируйте .env.example в .env}:8123"
+      - "127.0.0.1:${CLICKHOUSE_02_TCP_PORT:?Скопируйте .env.example в .env}:9000"
     volumes:
       - ./infra/clickhouse/config.d/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
@@ -140,17 +136,17 @@ services:
       - clickhouse_02_data:/var/lib/clickhouse
 
   kafka:
-    image: ${KAFKA_IMAGE:-apache/kafka:4.3.1}
+    image: apache/kafka:4.3.1
     hostname: kafka
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${KAFKA_EXTERNAL_PORT:-29092}:29092"
+      - "127.0.0.1:${KAFKA_EXTERNAL_PORT:?Скопируйте .env.example в .env}:29092"
     environment:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
       KAFKA_LISTENERS: "INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092"
-      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT:-29092}"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT:?Скопируйте .env.example в .env}"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
       KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
@@ -175,7 +171,7 @@ services:
       start_period: 30s
 
   kafka-init:
-    image: ${KAFKA_IMAGE:-apache/kafka:4.3.1}
+    image: apache/kafka:4.3.1
     restart: "no"
     depends_on:
       kafka:
@@ -218,7 +214,7 @@ services:
 
   # DDL применяется с ноды 1 по порядку имён файлов после готовности всего кластера.
   clickhouse-init:
-    image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.3.17.56}
+    image: clickhouse/clickhouse-server:26.3.17.56
     restart: "no"
     depends_on:
       kafka-init:
@@ -270,7 +266,7 @@ services:
     command: ["batch"]
 
   postgres-metadata:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    image: postgres:16-alpine
     restart: unless-stopped
     command:
       - postgres
@@ -279,13 +275,13 @@ services:
       - -c
       - max_connections=50
     environment:
-      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-postgres-local}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?Скопируйте .env.example в .env}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
       POSTGRES_DB: postgres
-      AIRFLOW_METADATA_USER: ${AIRFLOW_METADATA_USER:-airflow}
-      AIRFLOW_METADATA_PASSWORD: ${AIRFLOW_METADATA_PASSWORD:-airflow-local}
-      SUPERSET_METADATA_USER: ${SUPERSET_METADATA_USER:-superset}
-      SUPERSET_METADATA_PASSWORD: ${SUPERSET_METADATA_PASSWORD:-superset-local}
+      AIRFLOW_METADATA_USER: ${AIRFLOW_METADATA_USER:?Скопируйте .env.example в .env}
+      AIRFLOW_METADATA_PASSWORD: ${AIRFLOW_METADATA_PASSWORD:?Скопируйте .env.example в .env}
+      SUPERSET_METADATA_USER: ${SUPERSET_METADATA_USER:?Скопируйте .env.example в .env}
+      SUPERSET_METADATA_PASSWORD: ${SUPERSET_METADATA_PASSWORD:?Скопируйте .env.example в .env}
     volumes:
       - ./infra/postgres/init/10-metadata-databases.sh:/docker-entrypoint-initdb.d/10-metadata-databases.sh:ro
       - postgres_metadata_data:/var/lib/postgresql/data
@@ -326,7 +322,7 @@ services:
         condition: service_completed_successfully
     command: api-server
     ports:
-      - "127.0.0.1:${AIRFLOW_PORT:-28080}:8080"
+      - "127.0.0.1:${AIRFLOW_PORT:?Скопируйте .env.example в .env}:8080"
     mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/api/v2/monitor/health | python -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)[\"metadatabase\"][\"status\"] == \"healthy\" else 1)'"]
@@ -387,7 +383,7 @@ services:
       superset-init:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:${SUPERSET_PORT:-28088}:8088"
+      - "127.0.0.1:${SUPERSET_PORT:?Скопируйте .env.example в .env}:8088"
     mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8088/health >/dev/null"]
@@ -397,7 +393,7 @@ services:
       start_period: 30s
 
   prometheus:
-    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.13.2}
+    image: prom/prometheus:v3.13.2
     restart: unless-stopped
     depends_on:
       clickhouse-keeper:
@@ -415,7 +411,7 @@ services:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "127.0.0.1:${PROMETHEUS_PORT:-29090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:?Скопируйте .env.example в .env}:9090"
     mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/ready >/dev/null 2>&1"]
@@ -425,14 +421,14 @@ services:
       start_period: 10s
 
   grafana:
-    image: ${GRAFANA_IMAGE:-grafana/grafana:13.1.1}
+    image: grafana/grafana:13.1.1
     restart: unless-stopped
     depends_on:
       prometheus:
         condition: service_healthy
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Скопируйте .env.example в .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
@@ -441,7 +437,7 @@ services:
       - ./infra/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - grafana_data:/var/lib/grafana
     ports:
-      - "127.0.0.1:${GRAFANA_PORT:-23000}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:?Скопируйте .env.example в .env}:3000"
     mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/api/health >/dev/null"]

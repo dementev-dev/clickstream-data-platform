@@ -1,5 +1,4 @@
-ARG AIRFLOW_BASE_IMAGE
-FROM ${AIRFLOW_BASE_IMAGE}
+FROM apache/airflow:3.3.0
 
 USER root
 

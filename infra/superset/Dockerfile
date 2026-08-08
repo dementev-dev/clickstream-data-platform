@@ -1,5 +1,4 @@
-ARG SUPERSET_BASE_IMAGE
-FROM ${SUPERSET_BASE_IMAGE}
+FROM apache/superset:6.1.0
 
 USER root
 
