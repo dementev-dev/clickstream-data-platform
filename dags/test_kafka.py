@@ -100,9 +100,7 @@ def test_kafka():
             if error is not None:
                 delivery_errors.append(str(error))
             else:
-                addresses.append(
-                    RecordAddress(message.partition(), message.offset())
-                )
+                addresses.append(RecordAddress(message.partition(), message.offset()))
 
         producer = Producer(PRODUCER_CONFIG)
         # produce() не пишет, а ставит сообщение в очередь: о судьбе записи
