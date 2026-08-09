@@ -77,7 +77,7 @@ class RecordAddress(NamedTuple):
 @dag(
     dag_id="test_kafka",
     schedule=None,
-    start_date=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+    start_date=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
     catchup=False,
     tags=["проверка"],
     doc_md=__doc__,
