@@ -3,9 +3,7 @@ GENERATOR_DAY ?= 0
 GENERATOR_LIMIT ?=
 GENERATOR_SPEED ?=
 
-# Цели корня — про стенд. Проверки генератора живут за своей дверью, в
-# `generator/Makefile`: генератор — отдельная и заменяемая сущность со своим
-# `pyproject.toml`, локом и образом, и цели у него свои.
+# Цели корня — про стенд; проверки генератора — в `generator/Makefile`.
 .PHONY: up down clean ps logs smoke check-clickhouse check-services config-test lint generate-batch generate-live
 
 # --- Жизнь стенда ---
@@ -47,8 +45,7 @@ config-test:
 # Пути названы вслух: без них ruff из корня прошёлся бы и по генератору, а у
 # того своя дверь и свой конфиг. Версия закреплена, потому что лока в корне
 # нет, а форматтер между версиями меняет вывод — иначе проверка однажды
-# покраснела бы сама, без единой правки в репозитории. Держать её равной той,
-# что в `generator/uv.lock`, приходится руками: сверять их некому.
+# покраснела бы сама, без единой правки в репозитории.
 lint:
 	uvx ruff@0.16.1 check dags infra/superset
 	uvx ruff@0.16.1 format --check dags infra/superset
