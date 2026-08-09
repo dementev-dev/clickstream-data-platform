@@ -3,7 +3,10 @@ GENERATOR_DAY ?= 0
 GENERATOR_LIMIT ?=
 GENERATOR_SPEED ?=
 
-.PHONY: up down clean ps logs generate-batch generate-live config-test lint typecheck test docs inventory smoke check-clickhouse check-services
+# Цели корня — про стенд; проверки генератора — в `generator/Makefile`.
+.PHONY: up down clean ps logs smoke check-clickhouse check-services config-test lint generate-batch generate-live
+
+# --- Жизнь стенда ---
 
 # Второй шаг: `--wait` дожидается служб, а приём событий асинхронный — довод
 # целиком в шапке скрипта.
@@ -23,33 +26,7 @@ ps:
 logs:
 	$(COMPOSE) logs --follow
 
-generate-batch:
-	$(COMPOSE) --profile generator run --rm generator batch --day "$(GENERATOR_DAY)" \
-		$(if $(GENERATOR_LIMIT),--limit "$(GENERATOR_LIMIT)")
-
-generate-live:
-	$(COMPOSE) --profile generator run --rm generator live --day "$(GENERATOR_DAY)" \
-		$(if $(GENERATOR_SPEED),--speed "$(GENERATOR_SPEED)")
-
-config-test:
-	COMPOSE_BIN="$(COMPOSE)" ./scripts/config-test.sh
-
-lint:
-	cd generator && uv run ruff check && uv run ruff format --check
-
-typecheck:
-	cd generator && uv run ty check
-
-test:
-	cd generator && uv run pytest
-
-docs:
-	cd generator && uv run python -m clickstream_generator.schema_doc \
-		../docs/formats/clickstream-event.md
-
-inventory:
-	cd generator && uv run python -m clickstream_generator.inventory \
-		../data/world-inventory.json
+# --- Проверки, которым нужен поднятый стенд ---
 
 smoke:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-smoke.sh
@@ -59,3 +36,26 @@ check-clickhouse:
 
 check-services:
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/stand-services.sh
+
+# --- Проверки, которым стенд не нужен ---
+
+config-test:
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/config-test.sh
+
+# Пути названы вслух: без них ruff из корня прошёлся бы и по генератору, а у
+# того своя дверь и свой конфиг. Версия закреплена, потому что лока в корне
+# нет, а форматтер между версиями меняет вывод — иначе проверка однажды
+# покраснела бы сама, без единой правки в репозитории.
+lint:
+	uvx ruff@0.16.1 check dags infra/superset
+	uvx ruff@0.16.1 format --check dags infra/superset
+
+# --- Наполнение миром ---
+
+generate-batch:
+	$(COMPOSE) --profile generator run --rm generator batch --day "$(GENERATOR_DAY)" \
+		$(if $(GENERATOR_LIMIT),--limit "$(GENERATOR_LIMIT)")
+
+generate-live:
+	$(COMPOSE) --profile generator run --rm generator live --day "$(GENERATOR_DAY)" \
+		$(if $(GENERATOR_SPEED),--speed "$(GENERATOR_SPEED)")

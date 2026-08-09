@@ -77,7 +77,7 @@ class RecordAddress(NamedTuple):
 @dag(
     dag_id="test_kafka",
     schedule=None,
-    start_date=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+    start_date=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
     catchup=False,
     tags=["проверка"],
     doc_md=__doc__,
@@ -100,9 +100,7 @@ def test_kafka():
             if error is not None:
                 delivery_errors.append(str(error))
             else:
-                addresses.append(
-                    RecordAddress(message.partition(), message.offset())
-                )
+                addresses.append(RecordAddress(message.partition(), message.offset()))
 
         producer = Producer(PRODUCER_CONFIG)
         # produce() не пишет, а ставит сообщение в очередь: о судьбе записи

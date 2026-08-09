@@ -75,8 +75,7 @@ def _table_engines(client, source: str) -> list[tuple[str, str]]:
 
 def _drop_tables(client) -> None:
     client.command(
-        f"DROP TABLE IF EXISTS default.{DISTRIBUTED_TABLE} "
-        f"ON CLUSTER {CLUSTER} SYNC"
+        f"DROP TABLE IF EXISTS default.{DISTRIBUTED_TABLE} ON CLUSTER {CLUSTER} SYNC"
     )
     client.command(
         f"DROP TABLE IF EXISTS default.{LOCAL_TABLE} ON CLUSTER {CLUSTER} SYNC"
@@ -97,7 +96,7 @@ def _assert_tables_absent(client) -> None:
 @dag(
     dag_id="test_clickhouse",
     schedule=None,
-    start_date=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+    start_date=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
     catchup=False,
     tags=["проверка"],
     doc_md=__doc__,
@@ -178,9 +177,7 @@ def test_clickhouse():
                 """
             ).result_rows
             if len(node_2_rows) != 1:
-                raise RuntimeError(
-                    f"не удалось определить имя ноды 2: {node_2_rows}"
-                )
+                raise RuntimeError(f"не удалось определить имя ноды 2: {node_2_rows}")
             distributed_rows = client.query(
                 f"""
                 SELECT _shard_num, hostName(), marker
