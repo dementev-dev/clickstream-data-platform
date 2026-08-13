@@ -376,6 +376,7 @@ services:
     group_add:
       - ${DOCKER_GID:?Скопируйте .env.example в .env}
     # Тома перечислены заново: список службы общий не дополняет, а заменяет.
+    # Появится новый том у остальных служб Airflow — добавьте и сюда.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dags:/opt/airflow/dags:ro
