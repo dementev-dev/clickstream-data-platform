@@ -237,6 +237,7 @@ check_airflow_probes() {
 }
 
 check_superset() {
+    local clickhouse_password
     local config
     local login
     local metadata_tables
@@ -253,6 +254,7 @@ check_superset() {
     config="$(compose config --format json 2>/dev/null || true)"
     user="$(jq -r '.services.superset.environment.SUPERSET_ADMIN_USER // empty' <<<"$config")"
     password="$(jq -r '.services.superset.environment.SUPERSET_ADMIN_PASSWORD // empty' <<<"$config")"
+    clickhouse_password="$(jq -r '.services.superset.environment.CLICKHOUSE_BI_PASSWORD // empty' <<<"$config")"
     superset_user="$(jq -r '.services["postgres-metadata"].environment.SUPERSET_METADATA_USER // empty' <<<"$config")"
     superset_password="$(jq -r '.services["postgres-metadata"].environment.SUPERSET_METADATA_PASSWORD // empty' <<<"$config")"
     port="$(published_port superset 8088)"
@@ -284,10 +286,10 @@ check_superset() {
     if [[ "$metadata_tables" == '1' ]] && \
         [[ "$metadata_engine" == "postgresql|${superset_user}|postgres-metadata|5432|superset" ]] && \
         [[ "$stored_uuid" == '4b8f2c6e-1d3a-4f5b-9c7d-2e8a1f0b3c5d' ]] && \
-        [[ "$stored_uri" == 'clickhousedb://default@clickhouse-02:8123/default' ]]; then
+        [[ "$stored_uri" == "clickhousedb://bi:${clickhouse_password}@clickhouse-02:8123/default" ]]; then
         pass 'метаданные Superset живут в Postgres, подготовленное подключение указывает на clickhouse-02'
     else
-        fail "Superset не подтвердил Postgres и подготовленное подключение к ноде 2: таблицы=${metadata_tables:-нет}, движок=${metadata_engine:-нет}, UUID=${stored_uuid:-нет}, URI=${stored_uri:-нет}"
+        fail "Superset не подтвердил Postgres и подготовленное подключение bi к ноде 2: таблицы=${metadata_tables:-нет}, движок=${metadata_engine:-нет}, UUID=${stored_uuid:-нет}"
         return
     fi
 

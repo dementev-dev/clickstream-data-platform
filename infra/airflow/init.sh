@@ -26,6 +26,7 @@ runuser -u airflow -- airflow connections add clickhouse_default \
     --conn-type generic \
     --conn-host clickhouse-01 \
     --conn-port 8123 \
-    --conn-login default \
+    --conn-login etl \
+    --conn-password "$CLICKHOUSE_ETL_PASSWORD" \
     --conn-schema default \
     --conn-description "ClickHouse, нода 1; типизированный провайдер появится на этапе ETL"

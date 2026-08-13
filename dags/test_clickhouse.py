@@ -29,16 +29,29 @@ EXPECTED_TABLES = [
     (LOCAL_TABLE, "ReplicatedMergeTree"),
 ]
 
-# Ноду 2 пробник читает не своим подключением, а запросом remote() с ноды 1: у
-# Airflow подготовлено одно подключение — к clickhouse-01, и второго ради
-# пробника не заводят. При этом remote('clickhouse-02:9000', ...) делает
-# инициатором распределённого запроса саму ноду 2 — проверяется именно это, а
-# не доступность ноды 2 по сети. Порт 9000 — межсерверный, тогда как
-# подключение Airflow ходит по HTTP на 8123.
+# У Airflow одно подключение — к ноде 1; второго ради пробника не заводят.
+# Ноду 2 он читает через remote(), который не использует секрет из описания
+# кластера, поэтому учётные данные etl передаются явно. Порт 9000 — нативный,
+# тогда как подключение Airflow ходит по HTTP на 8123. Trace-журнал сервера
+# видит пароль: это допустимо только для локального учебного стенда.
 NODES = (
     ("ноде 1", "system.tables"),
-    ("ноде 2", "remote('clickhouse-02:9000', system.tables)"),
+    (
+        "ноде 2",
+        """remote(
+            'clickhouse-02:9000', 'system', 'tables',
+            {remote_user:String}, {remote_password:String}
+        )""",
+    ),
 )
+
+
+def _remote_parameters() -> dict[str, str]:
+    connection = Connection.get("clickhouse_default")
+    return {
+        "remote_user": connection.login,
+        "remote_password": connection.password,
+    }
 
 
 def _clickhouse_client():
@@ -52,8 +65,8 @@ def _clickhouse_client():
     return clickhouse_connect.get_client(
         host=connection.host,
         port=connection.port,
-        username=connection.login or "default",
-        password=connection.password or "",
+        username=connection.login,
+        password=connection.password,
         database=connection.schema or "default",
         connect_timeout=5,
         send_receive_timeout=30,
@@ -68,7 +81,8 @@ def _table_engines(client, source: str) -> list[tuple[str, str]]:
         WHERE database = 'default'
           AND name IN ('{LOCAL_TABLE}', '{DISTRIBUTED_TABLE}')
         ORDER BY name
-        """
+        """,
+        parameters=_remote_parameters(),
     )
     return result.result_rows
 
@@ -173,8 +187,12 @@ def test_clickhouse():
             node_2_rows = client.query(
                 """
                 SELECT hostName()
-                FROM remote('clickhouse-02:9000', system.one)
-                """
+                FROM remote(
+                    'clickhouse-02:9000', 'system', 'one',
+                    {remote_user:String}, {remote_password:String}
+                )
+                """,
+                parameters=_remote_parameters(),
             ).result_rows
             if len(node_2_rows) != 1:
                 raise RuntimeError(f"не удалось определить имя ноды 2: {node_2_rows}")
@@ -184,11 +202,16 @@ def test_clickhouse():
                 FROM remote(
                     'clickhouse-02:9000',
                     'default',
-                    '{DISTRIBUTED_TABLE}'
+                    '{DISTRIBUTED_TABLE}',
+                    {{remote_user:String}},
+                    {{remote_password:String}}
                 )
                 WHERE marker = {{marker:String}}
                 """,
-                parameters={"marker": written["marker"]},
+                parameters={
+                    "marker": written["marker"],
+                    **_remote_parameters(),
+                },
             ).result_rows
             if written["hostname"] == node_2_rows[0][0]:
                 raise RuntimeError(

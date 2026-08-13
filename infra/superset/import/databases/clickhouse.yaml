@@ -1,5 +1,5 @@
 database_name: ClickHouse
-sqlalchemy_uri: clickhousedb://default@clickhouse-02:8123/default
+sqlalchemy_uri: clickhousedb://bi@clickhouse-02:8123/default
 uuid: 4b8f2c6e-1d3a-4f5b-9c7d-2e8a1f0b3c5d
 cache_timeout: null
 expose_in_sqllab: true

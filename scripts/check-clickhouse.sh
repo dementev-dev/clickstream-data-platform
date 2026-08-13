@@ -18,7 +18,12 @@ compose() {
 query() {
     local service="$1"
     local sql="$2"
-    compose exec -T "$service" clickhouse-client --query "$sql" </dev/null
+    compose exec -T "$service" sh -c '
+        clickhouse-client \
+            --user default \
+            --password "$CLICKHOUSE_DEFAULT_PASSWORD" \
+            --query "$1"
+    ' _ "$sql" </dev/null
 }
 
 query_with_timeout() {
@@ -27,7 +32,12 @@ query_with_timeout() {
     local sql="$3"
     timeout --foreground "${timeout_seconds}s" \
         docker compose --project-directory "$ROOT_DIR" exec -T "$service" \
-        clickhouse-client --query "$sql"
+        sh -c '
+            clickhouse-client \
+                --user default \
+                --password "$CLICKHOUSE_DEFAULT_PASSWORD" \
+                --query "$1"
+        ' _ "$sql"
 }
 
 fail() {

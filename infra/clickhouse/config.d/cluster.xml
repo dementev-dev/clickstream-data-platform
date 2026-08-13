@@ -5,6 +5,11 @@
     -->
     <remote_servers>
         <clickstream_cluster>
+            <!--
+              ClickHouse 26.3 передаёт с секретом пользователя-инициатора на
+              соседний шард; секрет сверяется на обеих нодах.
+            -->
+            <secret from_env="CLICKHOUSE_CLUSTER_SECRET"/>
             <shard>
                 <internal_replication>true</internal_replication>
                 <replica>
@@ -33,4 +38,3 @@
         <path>/clickhouse/task_queue/ddl</path>
     </distributed_ddl>
 </clickhouse>
-

@@ -9,8 +9,13 @@ x-clickhouse-common: &clickhouse-common
   image: clickhouse/clickhouse-server:26.3.17.56
   restart: unless-stopped
   environment:
-    # Стенд локальный: нодам нужен общий пользователь без пароля для Distributed.
+    # Пользователей объявляет access.xml; настройка учётки образом не нужна.
     CLICKHOUSE_SKIP_USER_SETUP: "1"
+    CLICKHOUSE_CLUSTER_SECRET: ${CLICKHOUSE_CLUSTER_SECRET:?Скопируйте .env.example в .env}
+    CLICKHOUSE_DEFAULT_PASSWORD: ${CLICKHOUSE_DEFAULT_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_ANALYST_PASSWORD: ${CLICKHOUSE_ANALYST_PASSWORD:?Скопируйте .env.example в .env}
   depends_on:
     clickhouse-keeper:
       condition: service_healthy
@@ -18,7 +23,7 @@ x-clickhouse-common: &clickhouse-common
   # Гигабайта не хватало: половину съедали страницы самого бинарника (ADR 0004).
   mem_limit: 4g
   healthcheck:
-    test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --query 'SELECT 1' >/dev/null 2>&1"]
+    test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --user default --password \"$$CLICKHOUSE_DEFAULT_PASSWORD\" --query 'SELECT 1' >/dev/null 2>&1"]
     interval: 5s
     timeout: 3s
     retries: 30
@@ -44,6 +49,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:?Скопируйте .env.example в .env}
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
@@ -82,6 +88,7 @@ x-superset-common: &superset-common
     SUPERSET__SQLALCHEMY_DATABASE_URI: "postgresql+psycopg2://${SUPERSET_METADATA_USER:?Скопируйте .env.example в .env}:${SUPERSET_METADATA_PASSWORD:?Скопируйте .env.example в .env}@postgres-metadata:5432/superset"
     SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:?Скопируйте .env.example в .env}
     SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
   volumes:
     - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     - ./infra/superset/init.sh:/app/infra/init.sh:ro
@@ -109,7 +116,7 @@ services:
       retries: 30
       start_period: 10s
 
-  # Инициатор DDL и будущее подключение Airflow.
+  # Инициатор DDL и точка подключения Airflow.
   clickhouse-01:
     <<: *clickhouse-common
     hostname: clickhouse-01
@@ -120,9 +127,10 @@ services:
       - ./infra/clickhouse/config.d/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
       - ./infra/clickhouse/config.d/macros-01.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+      - ./infra/clickhouse/users.d/access.xml:/etc/clickhouse-server/users.d/access.xml:ro
       - clickhouse_01_data:/var/lib/clickhouse
 
-  # Будущее подключение Superset.
+  # Точка подключения Superset.
   clickhouse-02:
     <<: *clickhouse-common
     hostname: clickhouse-02
@@ -133,6 +141,7 @@ services:
       - ./infra/clickhouse/config.d/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
       - ./infra/clickhouse/config.d/macros-02.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+      - ./infra/clickhouse/users.d/access.xml:/etc/clickhouse-server/users.d/access.xml:ro
       - clickhouse_02_data:/var/lib/clickhouse
 
   kafka:
@@ -225,6 +234,7 @@ services:
         condition: service_healthy
     environment:
       LC_ALL: C
+      CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
     entrypoint: ["/bin/bash", "-ec"]
     command:
       - |
@@ -237,6 +247,8 @@ services:
           printf 'Применяем %s.\n' "$${ddl_file##*/}"
           clickhouse-client \
             --host clickhouse-01 \
+            --user etl \
+            --password "$$CLICKHOUSE_ETL_PASSWORD" \
             --multiquery \
             --queries-file "$$ddl_file"
         done
