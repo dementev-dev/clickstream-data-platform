@@ -12,6 +12,7 @@ x-clickhouse-common: &clickhouse-common
     # Стенд локальный: нодам нужен общий пользователь без пароля для Distributed.
     CLICKHOUSE_SKIP_USER_SETUP: "1"
     CLICKHOUSE_CLUSTER_SECRET: ${CLICKHOUSE_CLUSTER_SECRET:?Скопируйте .env.example в .env}
+    CLICKHOUSE_DEFAULT_PASSWORD: ${CLICKHOUSE_DEFAULT_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ANALYST_PASSWORD: ${CLICKHOUSE_ANALYST_PASSWORD:?Скопируйте .env.example в .env}
@@ -22,7 +23,7 @@ x-clickhouse-common: &clickhouse-common
   # Гигабайта не хватало: половину съедали страницы самого бинарника (ADR 0004).
   mem_limit: 4g
   healthcheck:
-    test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --query 'SELECT 1' >/dev/null 2>&1"]
+    test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --user default --password \"$$CLICKHOUSE_DEFAULT_PASSWORD\" --query 'SELECT 1' >/dev/null 2>&1"]
     interval: 5s
     timeout: 3s
     retries: 30

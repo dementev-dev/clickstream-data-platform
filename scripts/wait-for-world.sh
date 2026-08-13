@@ -42,7 +42,12 @@ fail() {
 
 query() {
     "${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" exec -T clickhouse-01 \
-        clickhouse-client --query "$1" </dev/null
+        sh -c '
+            clickhouse-client \
+                --user default \
+                --password "$CLICKHOUSE_DEFAULT_PASSWORD" \
+                --query "$1"
+        ' _ "$1" </dev/null
 }
 
 expected="$(jq '[.days[].events] | add' "$INVENTORY")"

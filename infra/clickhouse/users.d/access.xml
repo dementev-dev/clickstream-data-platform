@@ -37,6 +37,9 @@
     </roles>
 
     <users>
+        <default>
+            <password from_env="CLICKHOUSE_DEFAULT_PASSWORD"/>
+        </default>
         <etl>
             <password from_env="CLICKHOUSE_ETL_PASSWORD"/>
             <profile>default</profile>
