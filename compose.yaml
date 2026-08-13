@@ -29,6 +29,17 @@ x-clickhouse-common: &clickhouse-common
     retries: 30
     start_period: 10s
 
+# Факты стенда, у которых стало по два потребителя: разовая служба генератора и
+# пульт мира. Названы по одному разу — иначе однажды разойдутся, и заметит это
+# не проверка, а менти с пустым топиком.
+x-generator-image: &generator-image clickstream-generator:local
+
+x-kafka-target: &kafka-target
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_TOPIC: hits
+
+x-world-starting-days: &world-starting-days "8"
+
 x-airflow-common: &airflow-common
   image: clickstream-airflow:local
   build:
@@ -50,6 +61,13 @@ x-airflow-common: &airflow-common
     AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:?Скопируйте .env.example в .env}
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
+    # Пульт мира поднимает генератор сам, отдельным контейнером, — значит те же
+    # факты стенда, что compose даёт разовой службе генератора, нужны и дагам.
+    # Имя сети собирается из имени проекта: у второй копии стенда оно другое.
+    <<: *kafka-target
+    GENERATOR_IMAGE: *generator-image
+    STAND_NETWORK: ${COMPOSE_PROJECT_NAME}_default
+    WORLD_STARTING_DAYS: *world-starting-days
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
@@ -57,7 +75,7 @@ x-airflow-common: &airflow-common
     - airflow_auth:/opt/airflow/auth
 
 x-generator-common: &generator-common
-  image: clickstream-generator:local
+  image: *generator-image
   build:
     context: .
     dockerfile: generator/Dockerfile
@@ -75,8 +93,7 @@ x-generator-common: &generator-common
     # Адрес брокера и имя топика — факты стенда, и называет их стенд.
     # Остальное (день, зерно, число дней, предел пачки) приходит аргументами
     # от того, кто запускает: у службы нет позиции на оси мира.
-    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-    KAFKA_TOPIC: hits
+    <<: *kafka-target
 
 x-superset-common: &superset-common
   image: clickstream-superset:local
@@ -261,14 +278,15 @@ services:
   # Число дней стоит здесь числом: YAML не читает Python, и одно из двух мест
   # (второе — `STARTING_DAYS` в inventory.py) лишнее по построению. Правя одно,
   # правьте второе — на страже тут никто не стоит: залей эта служба лишний
-  # день, он лёг бы за рамкой дат описи и остался бы незамеченным.
+  # день, он лёг бы за рамкой дат описи и остался бы незамеченным. Внутри YAML
+  # число одно на всех: то же говорит дагам пульта, где кончается стартовый мир.
   #
   # Повторный `make up` заливает мир заново, и это не оплошность: `WatchID` у
   # событий те же, ReplacingMergeTree схлопнет повтор в ODS. Сырьё в STG при
   # этом честно удвоится — свойство слоя, описанное в storage.md.
   world-init:
     <<: *generator-common
-    command: ["batch", "--day", "0", "--days", "8"]
+    command: ["batch", "--day", "0", "--days", *world-starting-days]
 
   # Тот же образ для ручных прогонов: `make generate-batch`, `make generate-live`.
   # Под профилем — чтобы обычный подъём стенда её не трогал.
@@ -350,6 +368,21 @@ services:
       airflow-init:
         condition: service_completed_successfully
     command: scheduler
+    # Пульт мира зовёт генератор отдельным контейнером, а при LocalExecutor
+    # задачи исполняет сам планировщик — значит сокет докера нужен ему одному.
+    # Плата названа вслух в README и ADR 0009: доступ к сокету равен праву root
+    # на машине. Открывает дверь не монтирование, а группа: у сокета права 660
+    # и группа `docker`, чей GID на каждой машине свой и живёт в `.env`.
+    group_add:
+      - ${DOCKER_GID:?Скопируйте .env.example в .env}
+    # Тома перечислены заново: список службы общий не дополняет, а заменяет.
+    # Появится новый том у остальных служб Airflow — добавьте и сюда.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./dags:/opt/airflow/dags:ro
+      - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
+      - airflow_logs:/opt/airflow/logs
+      - airflow_auth:/opt/airflow/auth
     mem_limit: 640m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8974/health >/dev/null"]
