@@ -11,6 +11,10 @@ x-clickhouse-common: &clickhouse-common
   environment:
     # Стенд локальный: нодам нужен общий пользователь без пароля для Distributed.
     CLICKHOUSE_SKIP_USER_SETUP: "1"
+    CLICKHOUSE_CLUSTER_SECRET: ${CLICKHOUSE_CLUSTER_SECRET:?Скопируйте .env.example в .env}
+    CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_ANALYST_PASSWORD: ${CLICKHOUSE_ANALYST_PASSWORD:?Скопируйте .env.example в .env}
   depends_on:
     clickhouse-keeper:
       condition: service_healthy
@@ -120,6 +124,7 @@ services:
       - ./infra/clickhouse/config.d/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
       - ./infra/clickhouse/config.d/macros-01.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+      - ./infra/clickhouse/users.d/access.xml:/etc/clickhouse-server/users.d/access.xml:ro
       - clickhouse_01_data:/var/lib/clickhouse
 
   # Будущее подключение Superset.
@@ -133,6 +138,7 @@ services:
       - ./infra/clickhouse/config.d/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
       - ./infra/clickhouse/config.d/macros-02.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+      - ./infra/clickhouse/users.d/access.xml:/etc/clickhouse-server/users.d/access.xml:ro
       - clickhouse_02_data:/var/lib/clickhouse
 
   kafka:
