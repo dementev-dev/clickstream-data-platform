@@ -48,6 +48,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:?Скопируйте .env.example в .env}
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
@@ -86,6 +87,7 @@ x-superset-common: &superset-common
     SUPERSET__SQLALCHEMY_DATABASE_URI: "postgresql+psycopg2://${SUPERSET_METADATA_USER:?Скопируйте .env.example в .env}:${SUPERSET_METADATA_PASSWORD:?Скопируйте .env.example в .env}@postgres-metadata:5432/superset"
     SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:?Скопируйте .env.example в .env}
     SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
   volumes:
     - ./infra/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     - ./infra/superset/init.sh:/app/infra/init.sh:ro
@@ -231,6 +233,7 @@ services:
         condition: service_healthy
     environment:
       LC_ALL: C
+      CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
     entrypoint: ["/bin/bash", "-ec"]
     command:
       - |
@@ -243,6 +246,8 @@ services:
           printf 'Применяем %s.\n' "$${ddl_file##*/}"
           clickhouse-client \
             --host clickhouse-01 \
+            --user etl \
+            --password "$$CLICKHOUSE_ETL_PASSWORD" \
             --multiquery \
             --queries-file "$$ddl_file"
         done

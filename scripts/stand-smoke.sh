@@ -154,6 +154,7 @@ check_grafana_datasource() {
 check_airflow() {
     local airflow_port
     local airflow_token
+    local clickhouse_password
     local config
     local connection
     local dag
@@ -166,6 +167,7 @@ check_airflow() {
     config="$(compose config --format json 2>/dev/null || true)"
     user="$(jq -r '.services["airflow-apiserver"].environment.AIRFLOW_ADMIN_USER // empty' <<<"$config")"
     password="$(jq -r '.services["airflow-apiserver"].environment.AIRFLOW_ADMIN_PASSWORD // empty' <<<"$config")"
+    clickhouse_password="$(jq -r '.services["airflow-scheduler"].environment.CLICKHOUSE_ETL_PASSWORD // empty' <<<"$config")"
     airflow_port="$(published_port airflow-apiserver 8080)"
 
     health="$(curl -sf --max-time 10 \
@@ -211,12 +213,13 @@ check_airflow() {
         .connection_id == "clickhouse_default" and
         .host == "clickhouse-01" and
         .port == 8123 and
-        .login == "default" and
+        .login == "etl" and
         .schema == "default"
     ' >/dev/null 2>&1 <<<"$connection" && \
         timeout 20s "${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" \
             exec -T airflow-scheduler \
-            curl -sf 'http://clickhouse-01:8123/?query=SELECT%201' \
+            curl -sf -u "etl:${clickhouse_password}" \
+            'http://clickhouse-01:8123/?query=SELECT%201' \
             2>/dev/null | grep -qx '1'; then
         pass 'подготовленное подключение Airflow указывает на clickhouse-01, нода доступна из контейнера'
     else

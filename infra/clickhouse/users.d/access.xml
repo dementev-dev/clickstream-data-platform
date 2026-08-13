@@ -14,6 +14,8 @@
                 <query>GRANT SELECT ON system.*</query>
                 <query>GRANT CLUSTER ON *.*</query>
                 <query>GRANT REMOTE ON *.*</query>
+                <!-- В 26.3 движок Kafka требует право на внешний источник. -->
+                <query>GRANT KAFKA ON *.*</query>
             </grants>
         </etl_writer>
         <bi_reader>
