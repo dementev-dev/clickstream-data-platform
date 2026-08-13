@@ -9,7 +9,7 @@ x-clickhouse-common: &clickhouse-common
   image: clickhouse/clickhouse-server:26.3.17.56
   restart: unless-stopped
   environment:
-    # Стенд локальный: нодам нужен общий пользователь без пароля для Distributed.
+    # Пользователей объявляет access.xml; настройка учётки образом не нужна.
     CLICKHOUSE_SKIP_USER_SETUP: "1"
     CLICKHOUSE_CLUSTER_SECRET: ${CLICKHOUSE_CLUSTER_SECRET:?Скопируйте .env.example в .env}
     CLICKHOUSE_DEFAULT_PASSWORD: ${CLICKHOUSE_DEFAULT_PASSWORD:?Скопируйте .env.example в .env}
@@ -116,7 +116,7 @@ services:
       retries: 30
       start_period: 10s
 
-  # Инициатор DDL и будущее подключение Airflow.
+  # Инициатор DDL и точка подключения Airflow.
   clickhouse-01:
     <<: *clickhouse-common
     hostname: clickhouse-01
@@ -130,7 +130,7 @@ services:
       - ./infra/clickhouse/users.d/access.xml:/etc/clickhouse-server/users.d/access.xml:ro
       - clickhouse_01_data:/var/lib/clickhouse
 
-  # Будущее подключение Superset.
+  # Точка подключения Superset.
   clickhouse-02:
     <<: *clickhouse-common
     hostname: clickhouse-02
