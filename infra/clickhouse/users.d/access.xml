@@ -18,6 +18,7 @@
                 <query>GRANT KAFKA ON *.*</query>
             </grants>
         </etl_writer>
+        <!-- Оба читателя: clickhouse-connect читает system.settings при подключении. -->
         <bi_reader>
             <grants>
                 <query>GRANT SELECT ON dds.*</query>
@@ -42,7 +43,6 @@
         </default>
         <etl>
             <password from_env="CLICKHOUSE_ETL_PASSWORD"/>
-            <profile>default</profile>
             <quota>default</quota>
             <grants>
                 <query>GRANT etl_writer</query>
@@ -50,7 +50,6 @@
         </etl>
         <bi>
             <password from_env="CLICKHOUSE_BI_PASSWORD"/>
-            <profile>default</profile>
             <quota>default</quota>
             <grants>
                 <query>GRANT bi_reader</query>
@@ -58,7 +57,6 @@
         </bi>
         <analyst>
             <password from_env="CLICKHOUSE_ANALYST_PASSWORD"/>
-            <profile>default</profile>
             <quota>default</quota>
             <grants>
                 <query>GRANT analyst_reader</query>
