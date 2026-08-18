@@ -10,18 +10,53 @@
 поднятом стенде, где расхождение счётчиков выглядит поломкой хранилища.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
-from clickstream_generator.inventory import build
+import pytest
+
+from clickstream_generator import cli
+from clickstream_generator.inventory import STARTING_DAYS, build
 
 INVENTORY_PATH = Path(__file__).resolve().parents[2] / "data" / "world-inventory.json"
 
+# Прогон, слепок которого сверяется с описью байт в байт. День любой из
+# отправляемых; этот дешевле прочих — его окно короче.
+RUN_DAY = 2
 
-def test_inventory_is_up_to_date():
+
+@pytest.fixture(scope="module")
+def inventory() -> dict:
+    """Опись, собранная из кода: мир пересчитывается один раз на весь модуль."""
+    return build()
+
+
+def test_inventory_is_up_to_date(inventory: dict):
     stored = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
-    assert stored == build(), (
+    assert stored == inventory, (
         "опись мира отстала от кода — пересоберите: make inventory."
         " Разошлись хеши дней и каталога — правили data/catalog/products.csv;"
         " разошлись только дни — правили генератор"
     )
+
+
+def test_the_inventory_holds_the_hash_of_every_sent_snapshot(inventory: dict, tmp_path):
+    """У каждого отправленного слепка — своя строка с хешем его байтов.
+
+    Байты слепка не покрыты хешами дней ни при каком раскладе подпотоков: это
+    второй артефакт мира, и побайтовое обещание сторожит опись. Слепков на день
+    меньше, чем дней: прогон дня 0 не отправляет ничего.
+
+    Хеш сверяется с настоящей выгрузкой, а не с самим собой: в файл уезжают те
+    же байты, что и в Kafka, — по строке на заказ.
+    """
+    days = [row["day"] for row in inventory["snapshots"]]
+    assert days == list(range(STARTING_DAYS - 1))
+
+    path = tmp_path / "snapshot.jsonl"
+    assert cli.main(["snapshot", "--day", str(RUN_DAY), "--file", str(path)]) == 0
+    sent = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    row = next(row for row in inventory["snapshots"] if row["day"] == RUN_DAY - 1)
+    assert row["sha256"] == sent

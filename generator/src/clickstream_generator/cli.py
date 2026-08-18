@@ -1,4 +1,4 @@
-"""Интерфейс запуска: `python -m clickstream_generator batch|live`.
+"""Интерфейс запуска: `python -m clickstream_generator batch|live|snapshot`.
 
 Зовущий — контейнер (спека генератора, раздел 9), и интерфейс сделан под него:
 параметры приходят аргументами или переменными окружения, логи идут в
@@ -16,6 +16,11 @@
 живого есть `--speed` и нет пачки. Один флаг `--speed 0` прятал бы это
 различие за числом, а команда называет его словом. Ограниченная пачка живому
 дню не полагается: ждать там нечего — ожидание снимает ускорение.
+
+**Третья команда — `snapshot`** — второй источник стенда: слепок заказов в свой
+топик. У неё свой смысл `--day`: это день прогона, а уезжает слепок дня D−1
+(правило сдвига живёт в проигрывателе). Прогон дня 0 не отправляет ничего —
+на старте оси вчера нет.
 
 **Приёмник выбирается тем, что для него назвали**: `--file` или `--brokers`.
 Оба сразу — ошибка, ни одного — тоже: молча выбранный по умолчанию приёмник
@@ -56,14 +61,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     _check(parser, options)
     try:
         with closing(_sink(parser, options)) as sink:
-            player.play(
-                sink,
-                seed=options.seed,
-                first_day=options.day,
-                days=options.days,
-                limit=options.limit,
-                speed=options.speed,
-            )
+            if options.command == "snapshot":
+                player.play_snapshots(
+                    sink, seed=options.seed, first_day=options.day, days=options.days
+                )
+            else:
+                player.play(
+                    sink,
+                    seed=options.seed,
+                    first_day=options.day,
+                    days=options.days,
+                    limit=options.limit,
+                    speed=options.speed,
+                )
     except (OSError, RuntimeError) as failure:
         logging.error("прогон не удался: %s", failure)
         return 1
@@ -76,9 +86,9 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m clickstream_generator",
         description="Проигрыватель модельных дней кликстрима в файл или Kafka.",
     )
-    modes = parser.add_subparsers(dest="mode", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
 
-    batch = modes.add_parser(
+    batch = commands.add_parser(
         "batch", help="пачкой, без пауз: заливка снимка и переигровка дня"
     )
     _common(batch)
@@ -91,7 +101,7 @@ def _parser() -> argparse.ArgumentParser:
         help="взять не больше N событий на весь прогон, а не день целиком",
     )
 
-    live = modes.add_parser("live", help="живой день: темп модельного времени")
+    live = commands.add_parser("live", help="живой день: темп модельного времени")
     _common(live)
     live.set_defaults(limit=None)
     live.add_argument(
@@ -101,11 +111,16 @@ def _parser() -> argparse.ArgumentParser:
         metavar="X",
         help=f"ускорение модельного времени (по умолчанию ×{DEFAULT_SPEED:.0f})",
     )
+
+    snapshot = commands.add_parser(
+        "snapshot", help="слепок заказов: прогон дня D отправляет слепок дня D−1"
+    )
+    _common(snapshot)
     return parser
 
 
 def _common(parser: argparse.ArgumentParser) -> None:
-    """Что спрашивают у обоих режимов: какой мир, какие дни и куда."""
+    """Что спрашивают у всех команд: какой мир, какие дни и куда."""
     parser.add_argument(
         "--seed",
         type=int,
@@ -118,8 +133,8 @@ def _common(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=_env_int("GENERATOR_DAY", None),
         metavar="D",
-        help="номер дня на оси мира (D0 — первый); умолчания нет —"
-        " позицию ведёт зовущий",
+        help="номер дня на оси мира (D0 — первый); у snapshot это день прогона,"
+        " а уезжает слепок дня D−1; умолчания нет — позицию ведёт зовущий",
     )
     parser.add_argument(
         "--days",
@@ -133,7 +148,7 @@ def _common(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=_env("GENERATOR_FILE", None, Path),
         metavar="ПУТЬ",
-        help="приёмник — файл: одно событие в строке",
+        help="приёмник — файл: одна запись в строке",
     )
     parser.add_argument(
         "--brokers",

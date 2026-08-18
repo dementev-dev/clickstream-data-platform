@@ -27,16 +27,25 @@
 делает это одним вызовом на колонку, и на дне в полсотни тысяч событий разница
 заметна. Обратная сторона — день лежит в памяти дважды; проигрыватель поэтому
 и берёт его днями, а не горизонтом целиком.
+
+**Второй контракт провода — слепок заказов** (мастер-спека, раздел 2). Он не
+похож на событие: одиннадцать ключей вместо сорока семи, деньги строками, а
+не числами, времена с миллисекундами. Общее у них одно, зато главное: байты
+рождаются здесь и только здесь. Запись слепка — один словарь с вложенным
+списком и один `orjson.dumps`.
 """
 
+from collections.abc import Sequence
+from datetime import timedelta
 from typing import Any
 
 import numpy as np
 import orjson
 from numpy.typing import NDArray
 
-from clickstream_generator import schema
+from clickstream_generator import catalog, schema, world
 from clickstream_generator.day import Day
+from clickstream_generator.orders import Orders, at_boundary
 
 _ARRAY_PREFIX = "Array("
 
@@ -58,6 +67,78 @@ def events(day: Day, limit: int | None = None) -> list[bytes]:
         orjson.dumps(dict(zip(names, row, strict=True)))
         for row in zip(*values, strict=True)
     ]
+
+
+def orders(window: Sequence[Orders], day: int) -> list[bytes]:
+    """Канонические байты слепка дня `day`: по документу JSON на заказ.
+
+    `window` — заказы дней окна, от раннего дня к позднему: слепок несёт их
+    подряд, и порядок строк выходит порядком рождения заказов, он же
+    возрастание `order_id`. Какие это дни, решает `orders.window`.
+
+    Деньги уезжают строками с ровно двумя знаками, а не числами: у заказа они
+    станут `Decimal`, и дробь двоичного числа была бы потерей точности до
+    всякого разбора. Времена — метки UTC с миллисекундами; `snapshot_date`
+    одинакова во всей выгрузке — это дата дня, состояние которого снято.
+    """
+    goods = catalog.catalog()
+    sku = goods.sku.tolist()
+    prices = [_money(price) for price in goods.price.tolist()]
+    snapshot_date = (world.ORIGIN + timedelta(days=day)).isoformat()
+
+    payloads = []
+    for rows in window:
+        status, updated = at_boundary(rows, day)
+        created_at = _moments(rows.created_at)
+        updated_at = _moments(updated)
+        user_id = rows.user_id.tolist()
+        items_total = rows.items_total.tolist()
+        discount = rows.discount.tolist()
+        delivery = rows.delivery.tolist()
+        total = rows.total.tolist()
+
+        for number, order_id in enumerate(rows.order_id):
+            payloads.append(
+                orjson.dumps(
+                    {
+                        "order_id": order_id,
+                        "user_id": user_id[number],
+                        "status": status[number],
+                        "created_at": created_at[number],
+                        "updated_at": updated_at[number],
+                        "items_total": _money(items_total[number]),
+                        "discount": _money(discount[number]),
+                        "delivery": _money(delivery[number]),
+                        "total": _money(total[number]),
+                        "items": [
+                            {"sku": sku[item], "qty": count, "price": prices[item]}
+                            for item, count in zip(
+                                rows.product[number].tolist(),
+                                rows.quantity[number].tolist(),
+                                strict=True,
+                            )
+                        ],
+                        "snapshot_date": snapshot_date,
+                    }
+                )
+            )
+    return payloads
+
+
+def _money(kopecks: int) -> str:
+    """Копейки — строкой с ровно двумя знаками: `129990` → `1299.90`."""
+    return f"{kopecks // 100}.{kopecks % 100:02d}"
+
+
+def _moments(values: NDArray[np.datetime64]) -> list[str]:
+    """Метки времени — строками RFC 3339 в UTC с миллисекундами.
+
+    Три знака стоят всегда, в том числе `.000`: одинаковая длина дробной части
+    и одинаковая зона дают хронологическую сортировку простым сравнением строк,
+    а разбор в хранилище идёт по точному шаблону.
+    """
+    ms: NDArray[np.datetime64] = values.astype("datetime64[ms]")
+    return np.datetime_as_string(ms, unit="ms", timezone="UTC").tolist()
 
 
 def _values(column: schema.Column, values: NDArray[Any]) -> list[Any]:

@@ -26,6 +26,11 @@
 пересчитывается он и обычным `sha256sum` по сыгранному в файл дню (как
 именно — в README репозитория).
 
+Слепок заказов — второй артефакт мира, и хешами дней он не покрыт ни при каком
+раскладе подпотоков, поэтому у каждого отправленного слепка своя строка. Их на
+один меньше, чем дней: прогон дня 0 отправлять ещё нечего. Счёта строк у
+слепка нет — опись описывает мир, а не доставку.
+
 Собирается опись из каталога генератора целью `make inventory`, а свежесть её
 сторожит тест — как и у «описания выгрузки».
 """
@@ -39,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from clickstream_generator import day as day_module
+from clickstream_generator import orders as orders_module
 from clickstream_generator import serialize, world
 from clickstream_generator.catalog import CATALOG_PATH
 from clickstream_generator.seeds import CANONICAL_SEED
@@ -50,12 +56,25 @@ STARTING_DAYS = 8
 
 
 def build() -> dict[str, Any]:
-    """Опись целиком: паспорт мира и по строке на каждый его день."""
+    """Опись целиком: паспорт мира, строка на день и строка на слепок.
+
+    Дни играются по одному и отпускаются: заказы дня остаются, потому что из
+    них собираются слепки, а полсотни тысяч событий восьми дней сразу в память
+    не нужны.
+    """
+    days = []
+    orders = []
+    for number in range(STARTING_DAYS):
+        today = day_module.stream(CANONICAL_SEED, number)
+        days.append(_day(number, today))
+        orders.append(today.orders)
+
     return {
         "seed": CANONICAL_SEED,
         "generator_version": version("clickstream-generator"),
         "catalog_sha256": _digest(CATALOG_PATH.read_bytes()),
-        "days": [_day(number) for number in range(STARTING_DAYS)],
+        "days": days,
+        "snapshots": [_snapshot(number, orders) for number in range(STARTING_DAYS - 1)],
     }
 
 
@@ -64,7 +83,7 @@ def render() -> str:
     return json.dumps(build(), ensure_ascii=False, indent=2) + "\n"
 
 
-def _day(number: int) -> dict[str, Any]:
+def _day(number: int, today: day_module.Day) -> dict[str, Any]:
     """Строка описи: номер дня, его дата, число событий и хеш байтов.
 
     Дата считается от D0 арифметикой, а не берётся из событий: ось модельного
@@ -72,13 +91,32 @@ def _day(number: int) -> dict[str, Any]:
     стенда обрамляют счёт в `ods.event`. Соври она — подневная сверка это и
     покажет, каждый день сразу.
     """
-    payloads = serialize.events(day_module.stream(CANONICAL_SEED, number))
+    payloads = serialize.events(today)
     return {
         "day": number,
-        "date": (world.ORIGIN + timedelta(days=number)).isoformat(),
+        "date": _date(number),
         "events": len(payloads),
         "sha256": _digest(b"".join(payload + b"\n" for payload in payloads)),
     }
+
+
+def _snapshot(number: int, orders: list[orders_module.Orders]) -> dict[str, Any]:
+    """Строка описи слепка: какой день снят, его дата и хеш отправленных байтов.
+
+    Байты те же, что уезжают в топик `orders`, с переводом строки после
+    каждого заказа: пересъёмка слепка обязана дать их снова.
+    """
+    window = [orders[born] for born in orders_module.window(number)]
+    payloads = serialize.orders(window, number)
+    return {
+        "day": number,
+        "date": _date(number),
+        "sha256": _digest(b"".join(payload + b"\n" for payload in payloads)),
+    }
+
+
+def _date(number: int) -> str:
+    return (world.ORIGIN + timedelta(days=number)).isoformat()
 
 
 def _digest(payload: bytes) -> str:
