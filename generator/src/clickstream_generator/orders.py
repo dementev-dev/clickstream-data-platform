@@ -29,6 +29,11 @@
 его место занимает −1, а не ноль, — иначе «оплатили в секунду рождения» было
 бы не отличить от «не оплатили вовсе».
 
+**Состояние на границе суток** — чтение готовой судьбы, а не накопление:
+слепок дня D учитывает моменты не позже границы D|D+1 и по ним называет
+статус. Отсюда «дыхание» окна — заказ, оплаченный назавтра, стоит в сегодняшнем
+слепке как `created`, а завтра как `paid`.
+
 **Дельта суммы — вычеркнутая позиция**: товара не оказалось в наличии, и
 заказ приезжает на строку короче клиентской корзины, а `items_total` меньше
 ровно на её полную стоимость. Момента у дельты нет — склад собрал заказ до
@@ -79,6 +84,10 @@ class Orders:
     order_id: tuple[str, ...]
     # Пользователь магазина: тот же человек, что стоит за купившей кукой.
     user_id: NDArray[np.uint64]
+    # Когда строка заказа создана в базе источника: секунда той самой покупки
+    # — в модели строка создаётся синхронно с ней — и миллисекунда часов базы.
+    # От этого момента отсчитываются и моменты судьбы.
+    created_at: NDArray[np.datetime64]
     # Позиции заказа: номера товаров каталога и штуки, ячейка на заказ. У
     # заказа с дельтой позиций на одну меньше, чем в корзине клиента.
     product: tuple[NDArray[np.int64], ...]
@@ -104,11 +113,13 @@ def of_day(seed: int, day: int, purchases: Purchases) -> Orders:
     delivery = _delivery(rng, len(purchases))
     outcome, paid_after, cancelled_after = _fate(rng, len(purchases))
     product, quantity, items_total = _delta(rng, purchases)
+    created_at = _created_at(rng, purchases)
     discount = _discount(purchases)
     return Orders(
         day=day,
         order_id=purchases.order_id,
         user_id=purchases.person_id,
+        created_at=created_at,
         product=product,
         quantity=quantity,
         items_total=items_total,
@@ -119,6 +130,49 @@ def of_day(seed: int, day: int, purchases: Purchases) -> Orders:
         paid_after=paid_after,
         cancelled_after=cancelled_after,
     )
+
+
+def window(day: int) -> range:
+    """Дни рождения, чьи заказы несёт слепок дня `day`.
+
+    Окно изменяемости — константа мира; у начала оси оно усекается само, а не
+    сторожем: дней до D0 попросту нет.
+    """
+    return range(max(0, day - world.ORDER_WINDOW_DAYS + 1), day + 1)
+
+
+def at_boundary(rows: Orders, day: int) -> tuple[list[str], NDArray[np.datetime64]]:
+    """Статус заказов и момент их последнего изменения на границе `day`|`day+1`.
+
+    Судьба решена при рождении, поэтому слепок её только читает: момент позже
+    границы для него ещё не случился. Отмена перевешивает оплату — у дороги
+    «оплачен и отменён» она поздняя, и заказ на границе уже отменён.
+    `updated_at` — поздний учтённый момент, а без единого заказ показывает своё
+    рождение: строку с тех пор никто не трогал.
+    """
+    edge = _boundary(day)
+    paid = rows.created_at + rows.paid_after.astype("timedelta64[s]")
+    cancelled = rows.created_at + rows.cancelled_after.astype("timedelta64[s]")
+    # Момента, которого у исхода нет, в данных нет вовсе: там −1, и без маски
+    # он прикинулся бы моментом за секунду до рождения.
+    got_paid = (rows.paid_after >= 0) & (paid <= edge)
+    got_cancelled = (rows.cancelled_after >= 0) & (cancelled <= edge)
+
+    status = np.where(got_cancelled, "cancelled", np.where(got_paid, "paid", "created"))
+    updated = np.where(
+        got_cancelled, cancelled, np.where(got_paid, paid, rows.created_at)
+    )
+    return status.tolist(), updated
+
+
+def _boundary(day: int) -> np.datetime64:
+    """Граница суток `day`|`day+1` абсолютной меткой: полночь пояса счётчика.
+
+    Модельные сутки считаются в поясе счётчика, а моменты заказа — метки UTC:
+    между ними ровно смещение пояса.
+    """
+    midnight = np.datetime64(world.ORIGIN, "s") + np.timedelta64(day + 1, "D")
+    return midnight - np.timedelta64(world.COUNTER_TIMEZONE_MINUTES, "m")
 
 
 def _delivery(rng: np.random.Generator, orders: int) -> NDArray[np.int64]:
@@ -145,6 +199,22 @@ def _fate(
     cancelled = np.where(outcome == OrderOutcome.PAID, -1, first)
     cancelled = np.where(both, np.maximum(first, second), cancelled)
     return outcome, paid, cancelled
+
+
+def _created_at(
+    rng: np.random.Generator, purchases: Purchases
+) -> NDArray[np.datetime64]:
+    """Момент создания строки заказа: секунда покупки и миллисекунда часов базы.
+
+    Секунда приходит из события — строка создаётся синхронно с покупкой, и
+    сдвигать её значило бы подделывать аудит источника. Миллисекунду трекер не
+    видит вовсе: у него своё разрешение, у базы своё, и три дописанных нуля
+    выдали бы секундную модель за миллисекундную (исследование формата слепка).
+    """
+    millisecond = rng.integers(0, 1000, len(purchases))
+    return purchases.moment.astype("datetime64[ms]") + millisecond.astype(
+        "timedelta64[ms]"
+    )
 
 
 def _moment(rng: np.random.Generator, orders: int) -> NDArray[np.int64]:

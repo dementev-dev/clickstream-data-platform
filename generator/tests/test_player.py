@@ -22,27 +22,6 @@ from clickstream_generator.sinks import FileSink
 
 DAY = 2
 
-# Переменные, которыми зовущий задаёт прогон. Тест, читающий их из окружения
-# машины, зелен у одного и красен у другого — а на этой машине они как раз и
-# живут: стенд их экспортирует.
-LAUNCH_VARIABLES = (
-    "GENERATOR_SEED",
-    "GENERATOR_DAY",
-    "GENERATOR_DAYS",
-    "GENERATOR_LIMIT",
-    "GENERATOR_SPEED",
-    "GENERATOR_FILE",
-    "KAFKA_BOOTSTRAP_SERVERS",
-    "KAFKA_TOPIC",
-)
-
-
-@pytest.fixture(autouse=True)
-def bare_environment(monkeypatch):
-    """Прогон тестов не зависит от того, что задано в окружении машины."""
-    for name in LAUNCH_VARIABLES:
-        monkeypatch.delenv(name, raising=False)
-
 
 def _play(path, **options):
     """Проиграть в файл и вернуть итог прогона."""

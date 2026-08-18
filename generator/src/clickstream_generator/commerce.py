@@ -151,6 +151,10 @@ class Purchases:
     # та самая, что уехала в событие как `purchaseRevenue`. Бэкенд назовёт
     # её `items_total` — у двух источников свои имена одному числу.
     revenue: NDArray[np.int64]
+    # Когда покупка подтверждена — та же абсолютная метка, что уехала в
+    # событие. У заказа она станет секундой `created_at`: строка в базе
+    # источника создаётся синхронно с покупкой.
+    moment: NDArray[np.datetime64]
 
     def __len__(self) -> int:
         return self.person_id.size
@@ -185,6 +189,7 @@ _NO_PURCHASES = Purchases(
     quantity=(),
     coupon=(),
     revenue=np.empty(0, dtype=np.int64),
+    moment=np.empty(0, dtype="datetime64[s]"),
 )
 
 
@@ -666,6 +671,7 @@ def _purchases(
         quantity=tuple(draws.quantity[group] for group in bought),
         coupon=tuple(coupons[mine].tolist()),
         revenue=revenue[mine],
+        moment=rows["UTCEventTime"][here],
     )
 
 

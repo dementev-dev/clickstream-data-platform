@@ -16,6 +16,11 @@
 (раздел 5): это разные машины разной природы, и сложенные в одно число они
 перестают что-либо говорить. Сериализация считается частью генерации: она
 рождает те самые байты, которые сторожит опись.
+
+**Слепки заказов идут третьим ходом того же проигрывателя** и живут по правилу
+сдвига: прогон дня D отправляет слепок дня D−1 — ночная выгрузка бэкенда за
+вчера. Правило записано здесь одно и целиком, потому что оно и есть разница
+между двумя источниками: трекер шлёт сегодняшний день, бэкенд — вчерашний.
 """
 
 import logging
@@ -26,6 +31,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from clickstream_generator import day as day_module
+from clickstream_generator import orders as orders_module
 from clickstream_generator import serialize
 from clickstream_generator.sinks import Sink
 
@@ -101,6 +107,70 @@ def play(
     return Played(
         events=events, generated_seconds=generated, delivered_seconds=delivered
     )
+
+
+def play_snapshots(sink: Sink, seed: int, first_day: int, days: int = 1) -> None:
+    """Отправить слепки прогонов `days` дней подряд начиная с `first_day`.
+
+    Прогон дня D отправляет слепок дня D−1: содержимое слепка — чистая функция
+    зерна и дня, от момента отправки оно не зависит, а сдвиг делает живой день
+    обычным. На старте оси вчера нет, поэтому прогон дня 0 не отправляет
+    ничего.
+
+    Слепок собирается переигровкой дней своего окна: заказы дня — производная
+    всей воронки, дешёвого пути к ним нет. Окна соседних слепков перекрываются
+    почти целиком, и внутри одного прогона день играется один раз — иначе
+    стартовый диапазон стоил бы полусотни проигрышей вместо восьми. Между
+    прогонами не остаётся ничего: кэш на томе был бы состоянием, которого у
+    проигрывателя нет.
+    """
+    played: dict[int, orders_module.Orders] = {}
+    sent = 0
+    generated = 0.0
+    delivered = 0.0
+
+    for number in range(first_day, first_day + days):
+        taken = number - 1
+        if taken < 0:
+            continue
+
+        clock = time.monotonic()
+        window = [
+            _orders_of(played, seed, born) for born in orders_module.window(taken)
+        ]
+        payloads = serialize.orders(window, taken)
+        spent = time.monotonic() - clock
+        generated += spent
+        log.info(
+            "слепок дня %d: заказов %d, генерация %.1f с", taken, len(payloads), spent
+        )
+
+        clock = time.monotonic()
+        _send(sink, payloads)
+        sink.flush()
+        spent = time.monotonic() - clock
+        delivered += spent
+
+        sent += len(payloads)
+        log.info(
+            "слепок дня %d: отправлено %d, доставка %.1f с", taken, len(payloads), spent
+        )
+
+    log.info(
+        "итого отправлено %d заказов: генерация %.1f с, доставка %.1f с",
+        sent,
+        generated,
+        delivered,
+    )
+
+
+def _orders_of(
+    played: dict[int, orders_module.Orders], seed: int, number: int
+) -> orders_module.Orders:
+    """Заказы дня `number`, сыгранного один раз на весь прогон."""
+    if number not in played:
+        played[number] = day_module.stream(seed, number).orders
+    return played[number]
 
 
 def _send(sink: Sink, payloads: list[bytes]) -> None:

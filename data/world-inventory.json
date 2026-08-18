@@ -51,5 +51,42 @@
       "events": 49394,
       "sha256": "286ccc2451847ac8de215b5e902c328371021ad5502bd4afca0494b6f313aef7"
     }
+  ],
+  "snapshots": [
+    {
+      "day": 0,
+      "date": "2026-06-01",
+      "sha256": "98736f45970f65e04256cd3c108a07332a7276769b7a5dbf8b5617b75116a3c3"
+    },
+    {
+      "day": 1,
+      "date": "2026-06-02",
+      "sha256": "141c593f939eb695b8b639d9f47cc92efb5de1aa2aeffbc5f3abac63fa603628"
+    },
+    {
+      "day": 2,
+      "date": "2026-06-03",
+      "sha256": "c6f594f03bf1bba119bf591d5232fe6ce8d3793effab64d2171208f267ff8cac"
+    },
+    {
+      "day": 3,
+      "date": "2026-06-04",
+      "sha256": "382b20303450bbb7928e1f118cf36cc005c6d6747a215715c5d5c8dce0822f95"
+    },
+    {
+      "day": 4,
+      "date": "2026-06-05",
+      "sha256": "ef743bad81a87725a767be45bfb18dfc74c20173ba0da5c41ccf254640c5af76"
+    },
+    {
+      "day": 5,
+      "date": "2026-06-06",
+      "sha256": "1618cf0f9a6816a1e302e0518a067cd4c7ca295dd1b7f4660c73f77da5182dfe"
+    },
+    {
+      "day": 6,
+      "date": "2026-06-07",
+      "sha256": "4e32a4cc9a8cc997fbb4bdf4727c22eb3a763e0d262262eccfe6a3094a14d142"
+    }
   ]
 }
