@@ -189,9 +189,12 @@ def test_both_cookies_of_a_pair_order_as_one_user(week: list[day.Day]):
 def test_the_user_id_never_reaches_the_metrica_event(weekday: day.Day):
     """Кликстрим анонимен: личность держится формой контракта, а не забывчивостью.
 
-    Проверяются числовые колонки события целиком: личность — число того же
-    порядка, что кука и номер события, и попасть она могла бы только в
-    такую. Имени для неё в контракте нет вовсе.
+    Спрашивается двумя способами, потому что утечь личность может двумя.
+    Числом — тогда её видно в числовых колонках дня, и они сверяются со
+    всеми личностями дневной аудитории. Текстом — тогда сравнение чисел
+    её прозевало бы, поэтому строки покупок читаются целиком, вместе с
+    сырым `ecommerce`: этот блок собирается руками, и дописать в него
+    лишнее поле проще всего. Имени для личности в контракте схемы нет.
     """
     people = set(plan.audience(CANONICAL_SEED, WEEKDAY).person_id.tolist())
     assert people
@@ -200,4 +203,12 @@ def test_the_user_id_never_reaches_the_metrica_event(weekday: day.Day):
     for name, value in weekday.columns.items():
         if np.issubdtype(value.dtype, np.integer):
             assert not (set(value.tolist()) & people), name
+
+    events = purchases_of(weekday)
+    text = "\n".join(
+        " ".join(str(value[row]) for value in events.values())
+        for row in range(events["WatchID"].size)
+    )
+    for person in weekday.orders.user_id.tolist():
+        assert str(person) not in text
     assert set(weekday.orders.user_id.tolist()) <= people
