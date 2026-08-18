@@ -1,4 +1,4 @@
--- STG: чтец топика hits и таблицы сырья.
+-- STG: чтецы топиков hits и orders, таблицы сырья обоих источников.
 --
 -- Слой сырья ничего не интерпретирует: сообщение ложится строкой, как пришло,
 -- рядом с метаданными доставки. Довод целиком — ADR 0005, конвенции колонок и
@@ -91,3 +91,56 @@ SETTINGS ttl_only_drop_parts = 1;
 CREATE TABLE IF NOT EXISTS stg.hits_raw_dist ON CLUSTER clickstream_cluster
 AS stg.hits_raw_rep
 ENGINE = Distributed('clickstream_cluster', 'stg', 'hits_raw_rep', cityHash64(raw));
+
+-- Чтец топика orders. Матвью к нему не привязана: слепок забирает прямым
+-- SELECT даг orders_ingest. Почему пулл, почему без матвью и почему у топика
+-- одна партиция — ADR 0008; сам топик создаёт kafka-init в compose.yaml.
+--
+-- Без ON CLUSTER: таблица нужна только на clickhouse-01 — той ноде, к которой
+-- у Airflow подключение, и она же одна читает топик.
+--
+-- kafka_commit_on_select — вторая настройка прямого чтения: без неё офсеты не
+-- коммитятся и каждый запуск забирает один и тот же слепок заново. Первая,
+-- stream_like_engine_allow_direct_select, живёт на уровне запроса и стоит в
+-- самом заборе (dags/orders_ingest.py).
+CREATE TABLE IF NOT EXISTS stg.orders_raw_kafka
+(
+    raw String
+)
+ENGINE = Kafka
+SETTINGS
+    kafka_broker_list = 'kafka:9092',
+    kafka_topic_list = 'orders',
+    kafka_group_name = 'clickstream_orders',
+    kafka_format = 'RawBLOB',
+    kafka_commit_on_select = 1;
+
+-- Локальная таблица сырья заказов. Колонки, типы, ключ, нарезка и срок жизни —
+-- те же, что у сырья событий, и по тем же доводам: docs/architecture/storage.md.
+--
+-- Своя колонка здесь одна — _load_id, идентификатор пачки загрузки: он равен
+-- run_id прогона Airflow, который забрал порцию, и по нему разбор в ODS читает
+-- неизменный срез.
+CREATE TABLE IF NOT EXISTS stg.orders_raw_rep ON CLUSTER clickstream_cluster
+(
+    raw String,
+    kafka_topic LowCardinality(String),
+    kafka_partition UInt64,
+    kafka_offset UInt64,
+    kafka_timestamp Nullable(DateTime64(3, 'UTC')),
+    consumer_host LowCardinality(String),
+    _load_id String,
+    _load_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
+PARTITION BY toDate(_load_ts)
+ORDER BY (kafka_partition, kafka_offset)
+TTL toDateTime(_load_ts) + INTERVAL 3 DAY
+SETTINGS ttl_only_drop_parts = 1;
+
+-- Лицо слоя: пакетный забор пишет сюда, а не в локальную таблицу. Раскладку по
+-- шардам обязан решать ключ шардирования, то есть свойство данных, а не то,
+-- какая нода выполняла запрос, — а при пулле она всегда одна и та же.
+CREATE TABLE IF NOT EXISTS stg.orders_raw_dist ON CLUSTER clickstream_cluster
+AS stg.orders_raw_rep
+ENGINE = Distributed('clickstream_cluster', 'stg', 'orders_raw_rep', cityHash64(raw));
