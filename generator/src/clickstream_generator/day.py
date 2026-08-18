@@ -36,15 +36,21 @@
    гарантия, ради неё мы сужаем свободу старта. Цена названа — около 24
    визитов в день из ~9,5 тыс. не начинаются в последние минуты суток.
 
-**Шов с торговыми событиями.** Поток несёт, кроме колонок, два выровненных
-по строкам ряда: `page` — какая это страница магазина, и `product` — какой
-товар показывала карточка (−1 у прочих страниц). По ним `commerce` знает и
-то, куда сажать событие (карточка, подтверждение), и то, что посетитель на
-самом деле смотрел: товар в корзине, которого никто не открывал, — видимая
-глупость в воронке. Визит с назначенным заказом всегда доходит до
-`/confirmation`, а перед корзиной у него всегда есть карточка товара.
-Случайность у половин разная: трафик берёт подпоток `TRAFFIC`, торговля —
-`COMMERCE`, и правка одной не сдвигает другую.
+**Шов с торговыми событиями.** Поток несёт, кроме колонок, три выровненных
+по строкам ряда: `page` — какая это страница магазина, `product` — какой
+товар показывала карточка (−1 у прочих страниц), и `person` — человек за
+кукой этой строки. По первым двум `commerce` знает и то, куда сажать событие
+(карточка, подтверждение), и то, что посетитель на самом деле смотрел: товар
+в корзине, которого никто не открывал, — видимая глупость в воронке. Третий
+в события не попадает вовсе: личность нужна заказу, а кликстрим анонимен.
+Визит с назначенным заказом всегда доходит до `/confirmation`, а перед
+корзиной у него всегда есть карточка товара. Случайность у половин разная:
+трафик берёт подпоток `TRAFFIC`, торговля — `COMMERCE`, заказы — свой, и
+правка одной не сдвигает другие.
+
+**Заказы бэкенда** день отдаёт второй половиной: покупки, которые собрала
+торговая половина, заказная превращает в заказы дня — с личностью
+покупателя и деньгами магазина (`orders`).
 """
 
 from dataclasses import dataclass
@@ -53,7 +59,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from clickstream_generator import catalog, commerce, ids, plan, reference, world
+from clickstream_generator import catalog, commerce, ids, orders, plan, reference, world
 from clickstream_generator.reference import Page
 from clickstream_generator.seeds import Component, day_stream
 from clickstream_generator.weights import pick, pick_row
@@ -78,18 +84,22 @@ _SOURCE_CUMULATIVE = np.cumsum([source.weight for source in reference.TRAFFIC_SO
 
 @dataclass(frozen=True, slots=True)
 class Day:
-    """Поток событий одного дня: колонки выгрузки и страницы за ними.
+    """Прожитый день: поток событий трекера и заказы бэкенда.
 
     Строки упорядочены по времени — так их и проиграет проигрыватель.
     `columns` — колонки контракта схемы по его порядку, все до одной;
     `page` и `product` выровнены по тем же строкам (см. шов в докстринге
-    модуля).
+    модуля). `orders` — вторая половина дня: заказы, рождённые в нём.
+
+    Половины уезжают разными командами и в разные топики, но считаются
+    вместе: заказ — проекция покупки, и порознь им разойтись негде.
     """
 
     day: int
     columns: dict[str, NDArray[Any]]
     page: NDArray[np.uint8]
     product: NDArray[np.int64]
+    orders: orders.Orders
 
     def __len__(self) -> int:
         return self.page.size
@@ -149,15 +159,24 @@ def stream(seed: int, day: int) -> Day:
 
     order = np.lexsort((columns["WatchID"], columns["UTCEventTime"]))
     # Торговые события садятся на готовый трафиковый поток и отдают его
-    # целиком: в нём же они и упорядочиваются.
-    columns, page, product = commerce.weave(
+    # целиком: в нём же они и упорядочиваются. Вторым выходом приходят
+    # покупки дня — из них заказная сторона собирает заказы.
+    person = np.repeat(audience.person_id[visits.cookie], visits.pages)
+    columns, page, product, purchases = commerce.weave(
         seed,
         day,
         {name: value[order] for name, value in columns.items()},
         page[alive][order],
         product[alive][order],
+        person[alive][order],
     )
-    return Day(day=day, columns=columns, page=page, product=product)
+    return Day(
+        day=day,
+        columns=columns,
+        page=page,
+        product=product,
+        orders=orders.of_day(seed, day, purchases),
+    )
 
 
 def _visits(rng: np.random.Generator, audience: plan.DayAudience) -> _Visits:

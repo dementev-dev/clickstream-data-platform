@@ -43,6 +43,7 @@ def same_cohort(left: plan.Cohort, right: plan.Cohort) -> bool:
         and np.array_equal(left.pair_order_days, right.pair_order_days)
         and np.array_equal(left.device, right.device)
         and np.array_equal(left.city, right.city)
+        and np.array_equal(left.person_id, right.person_id)
     )
 
 
@@ -175,6 +176,33 @@ def test_the_passport_of_a_pair_is_one_person_with_two_devices():
     assert np.all(phone[cohort.device[first]] != phone[cohort.device[second]])
 
 
+def test_two_cookies_of_a_pair_are_one_person():
+    """Мост к склейке: у пары один `person_id`, у остальных — свой.
+
+    Значение непрозрачное и живёт ниже 2^53, как `ClientID`: выше JSON
+    округляет при разборе, а заказ повезёт его числом.
+    """
+    cohort = plan.cohort(CANONICAL_SEED, 0)
+    first, second = cohort.pair_cookies[:, 0], cohort.pair_cookies[:, 1]
+    assert cohort.pairs > 0
+    assert np.array_equal(cohort.person_id[first], cohort.person_id[second])
+
+    # Люди когорты — это первые куки: у них личность своя у каждого, а всего
+    # разных личностей в когорте ровно столько, сколько людей.
+    people = cohort.person_id[: cohort.people]
+    assert len(set(people.tolist())) == cohort.people
+    assert len(set(cohort.person_id.tolist())) == cohort.people
+    assert cohort.person_id.min() > 0
+    assert cohort.person_id.max() < 2**53
+
+
+def test_the_day_audience_knows_the_person_behind_a_cookie():
+    """День спрашивает личность у плана — больше её знать неоткуда."""
+    audience = plan.audience(CANONICAL_SEED, 5)
+    assert audience.person_id.size == audience.client_id.size
+    assert np.all(audience.person_id > 0)
+
+
 def test_the_passport_points_into_the_directories():
     cohort = plan.cohort(CANONICAL_SEED, 0)
     for passport, table in (
@@ -278,5 +306,6 @@ def test_plan_arrays_are_whole_numbers():
         cohort.active_day,
         cohort.pair_cookies,
         cohort.pair_order_days,
+        cohort.person_id,
     ):
         assert np.issubdtype(array.dtype, np.integer)

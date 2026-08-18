@@ -39,9 +39,17 @@
 дошедшие до потока дня, в порядке событий — до всяких потерь; поэтому номер
 присваивается последним ходом, когда поток уже упорядочен.
 
+**Второй выход — покупки дня.** Кроме потока событий торговая половина
+отдаёт покупки готовой структурой: номер заказа, корзина, деньги клиента,
+промокод и человек за кукой. Заказная сторона берёт их такими и ничего не
+пересчитывает: заказ — вторая проекция той же покупки, поэтому согласие двух
+источников не удерживается, а выходит по построению
+(docs/architecture/orders/snapshot.md).
+
 **Случайность — подпоток `COMMERCE`** (спека генератора, раздел 2): правка
 торгового поведения не сдвигает трафиковый поток. Броски целые и векторные;
-посточно собираются только строки — их numpy не умеет.
+посточно собираются только строки — их numpy не умеет. Новых бросков заказы
+сюда не добавляют: свои решения заказная сторона тянет из своего подпотока.
 """
 
 from dataclasses import dataclass
@@ -124,18 +132,60 @@ class _Draws:
 
 
 @dataclass(frozen=True, slots=True)
+class Purchases:
+    """Покупки дня готовой структурой — второй выход торговой половины.
+
+    Ряды одной длины, по элементу на покупку, в порядке номеров заказа.
+    Корзина лежит парой рядов ячеек — номера товаров каталога и штуки; в
+    каждой ячейке свой массив, длиной в число позиций покупки.
+    """
+
+    order_id: tuple[str, ...]
+    # Человек за кукой, которая купила: у заказа он назовётся `user_id`.
+    person_id: NDArray[np.uint64]
+    product: tuple[NDArray[np.int64], ...]
+    quantity: tuple[NDArray[np.int64], ...]
+    # Промокод события строкой; у покупки без кода — пустая.
+    coupon: tuple[str, ...]
+    # Деньги клиента целыми копейками: сумма позиций без скидки и доставки,
+    # та самая, что уехала в событие как `purchaseRevenue`. Бэкенд назовёт
+    # её `items_total` — у двух источников свои имена одному числу.
+    revenue: NDArray[np.int64]
+
+    def __len__(self) -> int:
+        return self.person_id.size
+
+
+@dataclass(frozen=True, slots=True)
 class _Events:
     """Строки одного вида торговых событий, готовые встать в поток.
 
     `raw` — сырой `ecommerce` каждой строки ещё объектом: номер заказа в нём
     появится, когда поток будет упорядочен, а строка станет байтами один
-    раз, каноническим сериализатором.
+    раз, каноническим сериализатором. `basket` говорит, чья корзина стоит за
+    строкой: по нему покупка находит свою после того, как поток упорядочен.
     """
 
     columns: dict[str, NDArray[Any]]
     page: NDArray[np.uint8]
     product: NDArray[np.int64]
     raw: list[dict[str, Any]]
+    basket: NDArray[np.int64]
+
+
+# Что торговая половина отдаёт дню: поток целиком — колонки, страницы и
+# товары — и покупки дня вторым выходом.
+Woven = tuple[dict[str, NDArray[Any]], NDArray[np.uint8], NDArray[np.int64], Purchases]
+
+# День без единой корзины: покупок в нём нет, а форма у рядов есть.
+_NO_PURCHASES = Purchases(
+    order_id=(),
+    person_id=np.empty(0, dtype=np.uint64),
+    product=(),
+    quantity=(),
+    coupon=(),
+    revenue=np.empty(0, dtype=np.int64),
+)
 
 
 def weave(
@@ -144,24 +194,34 @@ def weave(
     columns: dict[str, NDArray[Any]],
     page: NDArray[np.uint8],
     product: NDArray[np.int64],
-) -> tuple[dict[str, NDArray[Any]], NDArray[np.uint8], NDArray[np.int64]]:
-    """Вплетает торговые события в трафиковый поток и отдаёт поток целиком.
+    person: NDArray[np.uint64],
+) -> Woven:
+    """Вплетает торговые события в поток и отдаёт поток и покупки дня.
 
     Строки приходят упорядоченными по времени и такими же уходят: торговые
-    события встают между ними, и поток пересобирается одним порядком.
+    события встают между ними, и поток пересобирается одним порядком. Второй
+    выход — покупки дня: то же самое, чем они уехали в события.
+
+    `person` — человек за кукой каждой строки, выровненный по входящему
+    потоку: личность приходит от плана состава, а не выводится из трекера
+    (docs/architecture/orders/identity.md).
     """
     rng = day_stream(seed, day, Component.COMMERCE)
     baskets = _baskets(rng, page, product, columns["VisitID"])
     if not len(baskets):
-        return columns, page, product
+        return columns, page, product, _NO_PURCHASES
 
     goods = catalog.catalog()
     draws = _draws(rng, baskets)
+    revenue = _revenue(goods, baskets, draws)
+    coupons = _coupon_codes(draws)
     events = (
         _cart_events(columns, baskets, goods, draws),
-        _order_events(columns, baskets, goods, draws),
+        _order_events(columns, baskets, goods, draws, revenue, coupons),
     )
-    return _stream(rng, columns, page, product, events)
+    columns, page, product, basket = _stream(rng, columns, page, product, events)
+    purchases = _purchases(columns, basket, baskets, draws, revenue, coupons, person)
+    return columns, page, product, purchases
 
 
 def _draws(rng: np.random.Generator, baskets: _Baskets) -> _Draws:
@@ -307,6 +367,36 @@ def _coupons(rng: np.random.Generator, baskets: int) -> NDArray[np.int64]:
     return np.where(rng.integers(0, 100, baskets) < world.COUPON_PERCENT, code, -1)
 
 
+def _coupon_codes(draws: _Draws) -> NDArray[np.object_]:
+    """Промокод каждой корзины строкой; у корзины без кода — пустая.
+
+    Код нужен обеим сторонам: событие везёт его как есть, а бэкенд по нему
+    считает скидку заказа — по той же таблице чисел мира.
+    """
+    return np.array(
+        [
+            world.COUPONS[number][0] if number >= 0 else ""
+            for number in draws.coupon.tolist()
+        ],
+        dtype=object,
+    )
+
+
+def _revenue(
+    goods: catalog.Catalog, baskets: _Baskets, draws: _Draws
+) -> NDArray[np.int64]:
+    """Деньги клиента по корзинам, целыми копейками: сумма купленных позиций.
+
+    Сумма считается один раз на день и уезжает в оба источника: в событие —
+    как `purchaseRevenue`, в заказ — как `items_total`. Разойтись им негде,
+    и это не совпадение, а построение.
+    """
+    value = goods.price[baskets.product] * draws.quantity
+    kopecks = np.zeros(len(baskets), dtype=np.int64)
+    np.add.at(kopecks, baskets.basket[draws.kept], value[draws.kept])
+    return kopecks
+
+
 def _cart_events(
     columns: dict[str, NDArray[Any]],
     baskets: _Baskets,
@@ -329,6 +419,7 @@ def _cart_events(
         page=np.full(positions, Page.PRODUCT, dtype=np.uint8),
         product=baskets.product.copy(),
         raw=[{"currencyCode": world.CURRENCY, ADD_ACTION: block} for block in blocks],
+        basket=baskets.basket,
     )
 
 
@@ -337,6 +428,8 @@ def _order_events(
     baskets: _Baskets,
     goods: catalog.Catalog,
     draws: _Draws,
+    revenue: NDArray[np.int64],
+    coupons: NDArray[np.object_],
 ) -> _Events:
     """Строки `purchase`: по одной на корзину, дошедшую до подтверждения."""
     ordered = np.flatnonzero(baskets.confirmation >= 0)
@@ -352,14 +445,9 @@ def _order_events(
     rows.update(side)
 
     # Выручка клиента — сумма позиций без скидки и доставки, целыми копейками.
-    kopecks = [
-        int((goods.price[baskets.product[group]] * draws.quantity[group]).sum())
-        for group in bought
-    ]
-    codes = [
-        world.COUPONS[number][0] if number >= 0 else ""
-        for number in draws.coupon[ordered].tolist()
-    ]
+    # Считана она один раз на день: тем же числом её возьмёт заказ бэкенда.
+    kopecks = revenue[ordered].tolist()
+    codes = coupons[ordered].tolist()
     rows["purchaseRevenue"] = _cells(
         [np.array([money / KOPECKS], dtype=np.float64) for money in kopecks]
     )
@@ -380,6 +468,7 @@ def _order_events(
         page=np.full(ordered.size, Page.CONFIRMATION, dtype=np.uint8),
         product=np.full(ordered.size, -1, dtype=np.int64),
         raw=raw,
+        basket=ordered,
     )
 
 
@@ -479,8 +568,15 @@ def _stream(
     page: NDArray[np.uint8],
     product: NDArray[np.int64],
     events: tuple[_Events, ...],
-) -> tuple[dict[str, NDArray[Any]], NDArray[np.uint8], NDArray[np.int64]]:
-    """Собирает поток дня целиком: сутки режут хвост, время задаёт порядок."""
+) -> tuple[
+    dict[str, NDArray[Any]], NDArray[np.uint8], NDArray[np.int64], NDArray[np.int64]
+]:
+    """Собирает поток дня целиком: сутки режут хвост, время задаёт порядок.
+
+    Четвёртым рядом уходит корзина каждой строки — у просмотра страницы её
+    нет: по ней покупка находит свою корзину, когда поток уже упорядочен и
+    полночь свой хвост отрезала.
+    """
     traffic = page.size
     trade = {
         name: np.concatenate([part.columns[name] for part in events])
@@ -506,10 +602,17 @@ def _stream(
     place = np.full(traffic + len(raw), -1, dtype=np.int64)
     place[traffic:] = np.arange(len(raw))
 
+    basket = np.concatenate(
+        (
+            np.full(traffic, -1, dtype=np.int64),
+            np.concatenate([part.basket for part in events])[alive],
+        )
+    )
+
     order = np.lexsort((rows["WatchID"], rows["UTCEventTime"]))
     rows = {name: value[order] for name, value in rows.items()}
     _seal(rows, raw, place[order], _order_prefix(columns))
-    return rows, page[order], product[order]
+    return rows, page[order], product[order], basket[order]
 
 
 def _seal(
@@ -535,6 +638,35 @@ def _seal(
             block[PURCHASE_ACTION]["actionField"]["id"] = code
             rows["purchaseID"][row] = np.array([code], dtype=object)
         rows["ecommerce"][row] = orjson.dumps(block).decode()
+
+
+def _purchases(
+    rows: dict[str, NDArray[Any]],
+    basket: NDArray[np.int64],
+    baskets: _Baskets,
+    draws: _Draws,
+    revenue: NDArray[np.int64],
+    coupons: NDArray[np.object_],
+    person: NDArray[np.uint64],
+) -> Purchases:
+    """Покупки дня — то же, чем они уехали в события, только структурой.
+
+    Порядок здесь — порядок строк потока, он же порядок номеров заказа:
+    поток уже упорядочен и пронумерован, полночь свой хвост уже отрезала.
+    Человек берётся у строки подтверждения — визит принадлежит одной куке,
+    а кука одному человеку.
+    """
+    here = np.flatnonzero(rows["EventType"] == PURCHASE)
+    mine = basket[here]
+    bought = [baskets.positions_of(number, draws.kept) for number in mine.tolist()]
+    return Purchases(
+        order_id=tuple(rows["purchaseID"][row][0] for row in here.tolist()),
+        person_id=person[baskets.confirmation[mine]],
+        product=tuple(baskets.product[group] for group in bought),
+        quantity=tuple(draws.quantity[group] for group in bought),
+        coupon=tuple(coupons[mine].tolist()),
+        revenue=revenue[mine],
+    )
 
 
 def _midnight(columns: dict[str, NDArray[Any]]) -> np.datetime64:

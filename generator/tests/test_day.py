@@ -52,19 +52,39 @@ def readable(column: NDArray[Any]) -> list[Any]:
     return column.tolist()
 
 
+def orders(events: day.Day) -> list[list[Any]]:
+    """Заказы дня в сравнимом виде: строка на заказ, все его поля."""
+    theirs = events.orders
+    return [
+        [
+            theirs.order_id[number],
+            int(theirs.user_id[number]),
+            theirs.product[number].tolist(),
+            theirs.quantity[number].tolist(),
+            int(theirs.items_total[number]),
+            int(theirs.discount[number]),
+            int(theirs.delivery[number]),
+            int(theirs.total[number]),
+        ]
+        for number in range(len(theirs))
+    ]
+
+
 def snapshot(events: day.Day) -> dict[str, Any]:
     """Слепок дня для сравнений: всё, что день отдал наружу.
 
     Порядок колонок в слепке живёт отдельным списком: словари сравниваются
     без оглядки на него, а порядок — часть обещания (он же порядок
-    контракта схемы). Швы `page` и `product` — тоже часть отдаваемого, и
-    сторожить их надо тем же слепком, а не отдельной памятью.
+    контракта схемы). Швы `page` и `product` — тоже часть отдаваемого, как
+    и вторая половина дня, заказы: сторожить их надо тем же слепком, а не
+    отдельной памятью.
     """
     return {
         "order": list(events.columns),
         "values": [readable(column) for column in events.columns.values()],
         "page": events.page.tolist(),
         "product": events.product.tolist(),
+        "orders": orders(events),
     }
 
 
@@ -91,6 +111,7 @@ def test_the_snapshot_notices_everything_the_day_hands_out(weekday: day.Day):
         columns=dict(reversed(list(weekday.columns.items()))),
         page=weekday.page,
         product=weekday.product,
+        orders=weekday.orders,
     )
     assert snapshot(reordered) != original
 
@@ -100,6 +121,12 @@ def test_the_snapshot_notices_everything_the_day_hands_out(weekday: day.Day):
     shifted = weekday.page.copy()
     shifted[0] += 1
     assert snapshot(replace(weekday, page=shifted)) != original
+
+    paid = weekday.orders.total.copy()
+    paid[0] += 1
+    assert snapshot(replace(weekday, orders=replace(weekday.orders, total=paid))) != (
+        original
+    )
 
 
 def test_a_day_is_a_pure_function_of_the_seed_and_the_day():
