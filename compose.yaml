@@ -68,6 +68,7 @@ x-airflow-common: &airflow-common
     GENERATOR_IMAGE: *generator-image
     STAND_NETWORK: ${COMPOSE_PROJECT_NAME}_default
     WORLD_STARTING_DAYS: *world-starting-days
+    KAFKA_ORDERS_TOPIC: orders
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
@@ -237,6 +238,16 @@ services:
             "$${partition_count:-неизвестно}" >&2
           exit 1
         fi
+
+        # Топик заказов: одна партиция, читает его один чтец на ноде 1 —
+        # довод в ADR 0008.
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic orders \
+          --partitions 1 \
+          --replication-factor 1
 
   # DDL применяется с ноды 1 по порядку имён файлов после готовности всего кластера.
   clickhouse-init:

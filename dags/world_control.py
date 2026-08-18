@@ -7,6 +7,11 @@
 конца. Снят с паузы — мир едет день за днём; поставлен на паузу — встал на
 границе модельных суток.
 
+Сыграть день — половина работы. Вторая половина: отправить слепок заказов и
+дождаться, пока хранилище его заберёт. Поэтому у обоих работников за проигрышем
+идут отправка слепка тем же контейнером генератора и ждущий триггер дага приёма
+`orders_ingest`.
+
 Разделение не косметическое. Расписание на самом работнике заставило бы кнопку
 паузы значить две вещи разом — «мир не едет сам» и «даг выключен», — а работник
 при этом выглядел бы в списке выключенным, хотя нажимают его каждый день.
@@ -35,6 +40,9 @@ GENERATOR_ENVIRONMENT = {
     "KAFKA_BOOTSTRAP_SERVERS": os.environ["KAFKA_BOOTSTRAP_SERVERS"],
     "KAFKA_TOPIC": os.environ["KAFKA_TOPIC"],
 }
+# Топик слепка называется аргументом, а не окружением: KAFKA_TOPIC выше — топик
+# событий, и промолчи мы, заказы уехали бы к ним.
+ORDERS_TOPIC = os.environ["KAFKA_ORDERS_TOPIC"]
 STARTING_DAYS = int(os.environ["WORLD_STARTING_DAYS"])
 
 # Позиция на оси: номер первого несыгранного дня. Переменной нет — мир в
@@ -50,6 +58,10 @@ WORLD_POSITION = "world_position"
 # двадцати четырёх минут: тик только спрашивает «не пора ли снова».
 LIVE_TICK = datetime.timedelta(minutes=25)
 
+# Какой день играть, работник узнаёт у первой задачи. Спрашивают её все
+# генераторные шаги: слепок снимается с той же позиции, что и проигрыш.
+PLAYED_DAY = "{{ ti.xcom_pull(task_ids='first_unplayed_day') }}"
+
 START_DATE = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 TAGS = ["пульт мира"]
 
@@ -60,8 +72,8 @@ def first_unplayed_day() -> int:
     return int(Variable.get(WORLD_POSITION, default=STARTING_DAYS))
 
 
-def _play(task_id: str, command: list[str]) -> DockerOperator:
-    """Задача, играющая дни в каноническом контейнере генератора.
+def _generator(task_id: str, command: list[str]) -> DockerOperator:
+    """Задача, зовущая генератор в его каноническом контейнере.
 
     Внутрь образа Airflow генератор не поставить: он требует Python 3.14, а
     образ несёт 3.13. Да и обещание побайтовой воспроизводимости дано для
@@ -83,6 +95,22 @@ def _play(task_id: str, command: list[str]) -> DockerOperator:
     )
 
 
+def _ingest_orders() -> TriggerDagRunOperator:
+    """Задача забора: дёрнуть даг приёма и дождаться, чем он кончился.
+
+    Ожидание здесь несущее. Без него работник позеленел бы, не узнав, доехал
+    ли слепок, и позиция мира ушла бы вперёд хранилища — а зелёный конец графа
+    не должен переживать отказ выше (ADR 0003).
+    """
+    return TriggerDagRunOperator(
+        task_id="trigger_orders_ingest",
+        trigger_dag_id="orders_ingest",
+        wait_for_completion=True,
+        # Умолчание — минута опроса, а весь прогон работника пачкой короче.
+        poke_interval=10,
+    )
+
+
 @dag(
     dag_id="world_next_day",
     schedule=None,
@@ -90,7 +118,11 @@ def _play(task_id: str, command: list[str]) -> DockerOperator:
     is_paused_upon_creation=False,
     max_active_runs=1,
     tags=TAGS,
-    params={"days": Param(1, type="integer", minimum=1, title="Сколько дней прожить")},
+    params={
+        "days": Param(
+            1, type="integer", minimum=1, maximum=7, title="Сколько дней прожить"
+        )
+    },
 )
 def world_next_day():
     """Прожить следующие дни пачкой, без пауз.
@@ -106,18 +138,27 @@ def world_next_day():
         Variable.set(WORLD_POSITION, str(first_day + days))
 
     first_day = first_unplayed_day()
-    played = _play(
+    played = _generator(
         "play_days",
+        ["batch", "--day", PLAYED_DAY, "--days", "{{ params.days }}"],
+    )
+    # Разгон на N дней отправляет N слепков — по одному за сыгранный день, и
+    # каждый со своим сдвигом: прогон дня D везёт слепок дня D−1. Забор при
+    # этом остаётся один.
+    sent = _generator(
+        "send_snapshots",
         [
-            "batch",
+            "snapshot",
             "--day",
-            "{{ ti.xcom_pull(task_ids='first_unplayed_day') }}",
+            PLAYED_DAY,
             "--days",
             "{{ params.days }}",
+            "--topic",
+            ORDERS_TOPIC,
         ],
     )
 
-    first_day >> played >> remember_played(first_day)
+    first_day >> played >> sent >> _ingest_orders() >> remember_played(first_day)
 
 
 @dag(
@@ -142,12 +183,15 @@ def world_live_day():
         Variable.set(WORLD_POSITION, str(first_day + 1))
 
     first_day = first_unplayed_day()
-    played = _play(
-        "play_day",
-        ["live", "--day", "{{ ti.xcom_pull(task_ids='first_unplayed_day') }}"],
+    played = _generator("play_day", ["live", "--day", PLAYED_DAY])
+    # Слепок уезжает пачкой и после дня, а не в темпе: у выгрузки бэкенда темпа
+    # нет вовсе — она снимается на границе суток целиком.
+    sent = _generator(
+        "send_snapshot",
+        ["snapshot", "--day", PLAYED_DAY, "--topic", ORDERS_TOPIC],
     )
 
-    first_day >> played >> remember_played(first_day)
+    first_day >> played >> sent >> _ingest_orders() >> remember_played(first_day)
 
 
 @dag(
