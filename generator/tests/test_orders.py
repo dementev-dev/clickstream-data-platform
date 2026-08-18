@@ -1,9 +1,9 @@
 """Заказы бэкенда: проекция покупки, деньги магазина и мост к склейке.
 
-Заказ здесь ещё без судьбы — статуса, моментов и дельты (тикет #91): всё,
-что проверяется, это согласие двух источников по построению. Поэтому и
-сверяется заказ не с внутренней структурой торговой половины (это было бы
-сверкой кода с самим собой), а с событием, которое уехало в трекер.
+Здесь сверяются две проекции одной покупки — клиентское событие и заказ
+бэкенда — и судьба заказа. Сверяется заказ не с внутренней структурой
+торговой половины (это было бы сверкой кода с самим собой), а с событием,
+которое уехало в трекер.
 
 Чистота заказов от зерна и дня сторожится там же, где чистота событий, —
 слепком дня в `test_day.py`: заказы день отдаёт наружу наравне с потоком.
@@ -64,24 +64,60 @@ def test_every_order_of_the_day_is_a_purchase_of_the_day(weekday: day.Day):
     assert list(weekday.orders.order_id) == numbers
 
 
-def test_the_order_repeats_the_basket_and_the_money_of_its_purchase(weekday: day.Day):
-    """Корзина и деньги клиента у заказа те же — он их не пересчитывает."""
+def dropped_line(client: list[tuple[Any, int]], order: list[tuple[Any, int]]):
+    """Единственный индекс, удалением которого корзина клиента даёт заказ."""
+    for gone in range(len(client)):
+        if client[:gone] + client[gone + 1 :] == order:
+            return gone
+    return None
+
+
+def test_the_order_repeats_the_purchase_up_to_one_dropped_line(weekday: day.Day):
+    """Заказ повторяет покупку или теряет ровно одну позицию с её деньгами.
+
+    Дельта — единственное, чем заказ вправе разойтись с клиентом: строка
+    уходит целиком, вместе со своей полной стоимостью, и терять её
+    однопозиционному заказу нечего.
+    """
     goods = catalog.catalog()
+    price = dict(zip(goods.sku.tolist(), goods.price.tolist(), strict=True))
     events = purchases_of(weekday)
+    money = weekday.orders
+    deltas = 0
+
     for number, order in enumerate(weekday.orders.order_id):
         assert order == events["purchaseID"][number][0]
-        items = weekday.orders.product[number]
-        assert [goods.sku[item] for item in items.tolist()] == (
-            events["productID"][number].tolist()
+        client = list(
+            zip(
+                events["productID"][number].tolist(),
+                events["productQuantity"][number].tolist(),
+                strict=True,
+            )
         )
-        assert weekday.orders.quantity[number].tolist() == (
-            events["productQuantity"][number].tolist()
+        mine = list(
+            zip(
+                [goods.sku[item] for item in money.product[number].tolist()],
+                money.quantity[number].tolist(),
+                strict=True,
+            )
         )
         # Выручка клиента и `items_total` бэкенда — одно число: в событии
         # оно дробное, у заказа целое в копейках.
-        assert weekday.orders.items_total[number] == round(
-            events["purchaseRevenue"][number][0] * commerce.KOPECKS
-        )
+        revenue = round(events["purchaseRevenue"][number][0] * commerce.KOPECKS)
+        if mine == client:
+            assert money.items_total[number] == revenue
+            continue
+
+        gone = dropped_line(client, mine)
+        assert gone is not None, order
+        assert len(client) > 1
+        sku, quantity = client[gone]
+        line = price[sku] * quantity
+        assert money.items_total[number] == revenue - line
+        deltas += 1
+
+    # Сколько именно дельт — калибровка, а не контракт; ноль их быть не может.
+    assert deltas > 0
 
 
 def test_the_discount_comes_from_the_coupon_of_the_event(weekday: day.Day):
@@ -92,11 +128,14 @@ def test_the_discount_comes_from_the_coupon_of_the_event(weekday: day.Day):
     assert sum(1 for code in codes if code) > 10
 
     for number, code in enumerate(codes):
-        total = int(weekday.orders.items_total[number])
-        expected = total * percent[code] // 100 if code else 0
+        # Скидка берётся от клиентской выручки, и складская дельта её не
+        # пересчитывает. В событии выручка дробная, у заказа — копейки.
+        revenue = round(events["purchaseRevenue"][number][0] * commerce.KOPECKS)
+        expected = revenue * percent[code] // 100 if code else 0
         assert weekday.orders.discount[number] == expected
-    # Скидка без кода не берётся ниоткуда, а с кодом не съедает заказ.
-    assert np.all(weekday.orders.discount < weekday.orders.items_total)
+        # Скидка без кода не берётся ниоткуда, а с кодом не съедает заказ:
+        # мерой заказа здесь та же исходная выручка, что и у самой скидки.
+        assert weekday.orders.discount[number] < revenue
 
 
 def test_the_money_of_an_order_adds_up(weekday: day.Day):
@@ -114,6 +153,51 @@ def test_the_money_of_an_order_adds_up(weekday: day.Day):
     # Доставка — деньги, которых нет ни в одном событии: без неё «считаем по
     # бэкенду» ничего не значило бы.
     assert np.any(money.total != money.items_total - money.discount)
+
+
+def test_every_order_leaves_the_window_with_one_of_three_fates(weekday: day.Day):
+    """Судьба заказа: три исхода, и моменты рассказывают ту же историю.
+
+    Инвариант выхода из окна — заказ либо оплачен, либо отменён; `created`
+    навсегда мир не допускает. Момента, которого у исхода нет, нет и в
+    данных: его место занимает −1, а не ноль, иначе «оплатили в секунду
+    рождения» было бы не отличить от «не оплатили вовсе». Оставшиеся
+    моменты лежат внутри окна 144 часов — таблица весов кончается там же,
+    где окно у самого невезучего заказа, — а секунда внутри часа
+    равномерная: без неё разности времён аудита давали бы точные равенства.
+
+    Доли здесь не спрашиваются: их калибруют, а не фиксируют тестом.
+    """
+    window = 144 * 3600
+    fate = weekday.orders
+    outcomes = fate.outcome.tolist()
+    assert len(outcomes) == len(fate)
+    assert set(outcomes) == {
+        orders.OrderOutcome.PAID,
+        orders.OrderOutcome.PAID_THEN_CANCELLED,
+        orders.OrderOutcome.UNPAID_THEN_CANCELLED,
+    }
+
+    for outcome, paid, cancelled in zip(
+        outcomes, fate.paid_after.tolist(), fate.cancelled_after.tolist(), strict=True
+    ):
+        for moment in (paid, cancelled):
+            assert moment == -1 or 0 <= moment < window
+        if outcome == orders.OrderOutcome.PAID:
+            assert paid >= 0 and cancelled == -1
+        elif outcome == orders.OrderOutcome.PAID_THEN_CANCELLED:
+            # Ранний из двух моментов и есть оплата: порядок дорог выходит
+            # сортировкой, а не условной точкой отсчёта.
+            assert 0 <= paid <= cancelled
+        else:
+            assert paid == -1 and cancelled >= 0
+
+    seconds = {
+        moment % 3600
+        for moment in (*fate.paid_after.tolist(), *fate.cancelled_after.tolist())
+        if moment >= 0
+    }
+    assert len(seconds) > 1
 
 
 def test_the_order_side_draws_from_its_own_named_branch(

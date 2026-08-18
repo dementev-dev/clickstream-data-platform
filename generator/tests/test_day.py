@@ -65,6 +65,9 @@ def orders(events: day.Day) -> list[list[Any]]:
             int(theirs.discount[number]),
             int(theirs.delivery[number]),
             int(theirs.total[number]),
+            int(theirs.outcome[number]),
+            int(theirs.paid_after[number]),
+            int(theirs.cancelled_after[number]),
         ]
         for number in range(len(theirs))
     ]
@@ -127,6 +130,11 @@ def test_the_snapshot_notices_everything_the_day_hands_out(weekday: day.Day):
     assert snapshot(replace(weekday, orders=replace(weekday.orders, total=paid))) != (
         original
     )
+
+    moment = weekday.orders.paid_after.copy()
+    moment[np.flatnonzero(moment >= 0)[0]] += 1
+    fated = replace(weekday.orders, paid_after=moment)
+    assert snapshot(replace(weekday, orders=fated)) != original
 
 
 def test_a_day_is_a_pure_function_of_the_seed_and_the_day():
