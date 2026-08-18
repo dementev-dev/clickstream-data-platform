@@ -77,7 +77,7 @@ def test_day_components_do_not_share_randomness():
     components = (
         Component.TRAFFIC,
         Component.COMMERCE,
-        Component.DISCREPANCIES,
+        Component.ORDERS,
         Component.LATECOMERS,
     )
     assert len({int(component) for component in components}) == 4

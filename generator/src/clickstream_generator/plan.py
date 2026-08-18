@@ -16,6 +16,9 @@
   каждая из двух кук обязана оформить заказ;
 - паспорт куки — устройство и город: они у куки одни и те же во всех её
   днях, а знает об этом только план (у пары один город на двоих);
+- личность — `person_id` человека за кукой: у двух кук пары он один, и
+  заказ бэкенда показывает его как `user_id`
+  (docs/architecture/orders/identity.md);
 - счётчики — приток по дням, дневная и накопленная аудитория, пары.
 
 Единица дня здесь — день активности куки, а не визит: слово «визит»
@@ -92,6 +95,8 @@ class Cohort:
     # Паспорт куки: номер профиля устройства и номер города в справочниках.
     device: NDArray[np.int64]
     city: NDArray[np.int64]
+    # Человек за кукой: непрозрачный ID, одинаковый у двух кук пары.
+    person_id: NDArray[np.uint64]
 
     def __post_init__(self) -> None:
         """Когорта запоминается, поэтому массивы отдаются только на чтение.
@@ -132,6 +137,7 @@ class Cohort:
             assigned_order=np.isin(here, ordering),
             device=self.device[here],
             city=self.city[here],
+            person_id=self.person_id[here],
         )
 
 
@@ -147,6 +153,8 @@ class DayAudience:
     # Паспорт куки: номера строк в справочниках устройств и городов.
     device: NDArray[np.int64]
     city: NDArray[np.int64]
+    # Человек за кукой: его заказ покажет этот ID как `user_id`.
+    person_id: NDArray[np.uint64]
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,8 +208,11 @@ def cohort(seed: int, day: int) -> Cohort:
         rng, twins, active_cookie, active_day, cookies
     )
     # Паспорт бросается последним — после всего, что уже измерено: тогда
-    # счётчики канонического мира от этой добавки не двигаются.
+    # счётчики канонического мира от этой добавки не двигаются. По тому же
+    # правилу за ним приписана личность: этап 3 дописал её в конец, и куки,
+    # пары и паспорта остались теми же до байта.
     device, city = _passports(rng, twins, cookies)
+    person_id = _persons(rng, twins, people, cookies)
     return Cohort(
         day=day,
         people=people,
@@ -214,6 +225,7 @@ def cohort(seed: int, day: int) -> Cohort:
         pair_order_days=pair_order_days,
         device=device,
         city=city,
+        person_id=person_id,
     )
 
 
@@ -234,6 +246,7 @@ def audience(seed: int, day: int) -> DayAudience:
         assigned_order=np.concatenate([part.assigned_order for part in parts]),
         device=np.concatenate([part.device for part in parts]),
         city=np.concatenate([part.city for part in parts]),
+        person_id=np.concatenate([part.person_id for part in parts]),
     )
 
 
@@ -364,3 +377,22 @@ def _passports(
             pick(rng, _DEVICE_HALF_CUMULATIVE[half], here.size)
         ]
     return device, city
+
+
+def _persons(
+    rng: np.random.Generator, twins: NDArray[np.int64], people: int, cookies: int
+) -> NDArray[np.uint64]:
+    """Человек за каждой кукой: у двух кук пары ID один и тот же.
+
+    Личность — минимальная форма отношения «кука принадлежит человеку», и
+    знает его только план: заказ спрашивает и показывает то же число как
+    `user_id`, а в кликстрим оно не попадает вовсе
+    (docs/architecture/orders/identity.md). Значение непрозрачное и живёт
+    ниже 2^53 — тот же потолок, что у куки: выше JSON округляет при разборе.
+    """
+    person_id = np.empty(cookies, dtype=np.uint64)
+    person_id[:people] = rng.integers(1, ids.LIMIT, people, dtype=np.uint64)
+    # Вторая кука пары повторяет ID своего человека: заказы с двух кук —
+    # это и есть склейка, ради которой пары заведены.
+    person_id[twins[:, 1]] = person_id[twins[:, 0]]
+    return person_id
