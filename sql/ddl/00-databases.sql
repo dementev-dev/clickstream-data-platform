@@ -13,3 +13,6 @@ CREATE DATABASE IF NOT EXISTS stg ON CLUSTER clickstream_cluster;
 -- База ODS заводится здесь же, хотя её объекты приносит #43: базы дёшевы, а
 -- порядок файлов от этого не зависит.
 CREATE DATABASE IF NOT EXISTS ods ON CLUSTER clickstream_cluster;
+
+-- DDS начинается со словаря товаров; таблицы слоя появятся на следующем этапе.
+CREATE DATABASE IF NOT EXISTS dds ON CLUSTER clickstream_cluster;

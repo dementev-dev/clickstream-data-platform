@@ -9,7 +9,7 @@
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW ON default.*</query>
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON stg.*</query>
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON ods.*</query>
-                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON dds.*</query>
+                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY, dictGet, DROP TABLE, DROP VIEW, CREATE DATABASE ON dds.*</query>
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON dm.*</query>
                 <query>GRANT SELECT ON system.*</query>
                 <query>GRANT CLUSTER ON *.*</query>
@@ -21,7 +21,7 @@
         <!-- Оба читателя: clickhouse-connect читает system.settings при подключении. -->
         <bi_reader>
             <grants>
-                <query>GRANT SELECT ON dds.*</query>
+                <query>GRANT SELECT, dictGet ON dds.*</query>
                 <query>GRANT SELECT ON dm.*</query>
                 <query>GRANT SELECT ON system.settings</query>
             </grants>
@@ -30,7 +30,7 @@
             <grants>
                 <query>GRANT SELECT ON stg.*</query>
                 <query>GRANT SELECT ON ods.*</query>
-                <query>GRANT SELECT ON dds.*</query>
+                <query>GRANT SELECT, dictGet ON dds.*</query>
                 <query>GRANT SELECT ON dm.*</query>
                 <query>GRANT SELECT ON system.settings</query>
             </grants>

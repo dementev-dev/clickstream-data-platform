@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly CATALOG="${ROOT_DIR}/data/catalog/products.csv"
 readonly INVENTORY="${ROOT_DIR}/data/world-inventory.json"
 readonly CLUSTER="clickstream_cluster"
 readonly LOCAL_TABLE="smoke_replicated_local"
@@ -22,6 +23,17 @@ query() {
         clickhouse-client \
             --user default \
             --password "$CLICKHOUSE_DEFAULT_PASSWORD" \
+            --query "$1"
+    ' _ "$sql" </dev/null
+}
+
+query_as_etl() {
+    local service="$1"
+    local sql="$2"
+    compose exec -T "$service" sh -c '
+        clickhouse-client \
+            --user etl \
+            --password "$CLICKHOUSE_ETL_PASSWORD" \
             --query "$1"
     ' _ "$sql" </dev/null
 }
@@ -162,7 +174,7 @@ ensure_stand_running
 trap on_exit EXIT
 trap on_signal INT TERM
 
-printf 'Проверка 1/9: описание кластера одинаково на обеих нодах...\n'
+printf 'Проверка 1/10: описание кластера одинаково на обеих нодах...\n'
 cluster_sql="SELECT cluster, shard_num, replica_num, host_name, port FROM system.clusters WHERE cluster = '${CLUSTER}' ORDER BY shard_num, replica_num FORMAT TSV"
 cluster_01="$(query clickhouse-01 "$cluster_sql")"
 cluster_02="$(query clickhouse-02 "$cluster_sql")"
@@ -171,7 +183,7 @@ assert_equal "$expected_cluster" "$cluster_01" "неверная тополог�
 assert_equal "$expected_cluster" "$cluster_02" "неверная топология на второй ноде"
 printf 'ЗЕЛЁНО: обе ноды видят ожидаемые два шарда: clickhouse-01 и clickhouse-02.\n'
 
-printf 'Проверка 2/9: у нод разные макросы shard и replica...\n'
+printf 'Проверка 2/10: у нод разные макросы shard и replica...\n'
 macros_sql="SELECT macro, substitution FROM system.macros WHERE macro IN ('shard', 'replica') ORDER BY macro FORMAT TSV"
 macros_01="$(query clickhouse-01 "$macros_sql")"
 macros_02="$(query clickhouse-02 "$macros_sql")"
@@ -180,14 +192,14 @@ assert_equal $'replica\tclickhouse-02\nshard\t02' "$macros_02" "неверные
 [[ "$macros_01" != "$macros_02" ]] || fail "макросы нод не должны совпадать"
 printf 'ЗЕЛЁНО: clickhouse-01=(shard 01, replica clickhouse-01), clickhouse-02=(shard 02, replica clickhouse-02).\n'
 
-printf 'Проверка 3/9: keeper отвечает обеим нодам...\n'
+printf 'Проверка 3/10: keeper отвечает обеим нодам...\n'
 query clickhouse-01 "SELECT name FROM system.zookeeper WHERE path = '/' ORDER BY name FORMAT Null"
 query clickhouse-02 "SELECT name FROM system.zookeeper WHERE path = '/' ORDER BY name FORMAT Null"
 printf 'ЗЕЛЁНО: system.zookeeper доступна с обеих нод.\n'
 
 cleanup_tables || fail "не удалось очистить объекты предыдущего запуска"
 
-printf 'Проверка 4/9: ReplicatedMergeTree создаётся через ON CLUSTER...\n'
+printf 'Проверка 4/10: ReplicatedMergeTree создаётся через ON CLUSTER...\n'
 query clickhouse-01 "
     CREATE TABLE default.${LOCAL_TABLE} ON CLUSTER ${CLUSTER}
     (
@@ -205,13 +217,13 @@ assert_equal $'smoke_replicated_local\tReplicatedMergeTree' "$(query clickhouse-
 assert_equal $'smoke_replicated_local\tReplicatedMergeTree' "$(query clickhouse-02 "$tables_sql")" "локальная таблица не создана на второй ноде"
 printf 'ЗЕЛЁНО: ReplicatedMergeTree видна в system.tables на обеих нодах.\n'
 
-printf 'Проверка 5/9: путь в keeper собран из макроса shard...\n'
+printf 'Проверка 5/10: путь в keeper собран из макроса shard...\n'
 path_sql="SELECT zookeeper_path, replica_name FROM system.replicas WHERE database = 'default' AND table = '${LOCAL_TABLE}' FORMAT TSV"
 assert_equal "/clickhouse/tables/01/${LOCAL_TABLE}"$'\t'"clickhouse-01" "$(query clickhouse-01 "$path_sql")" "неверные путь или имя реплики на первой ноде"
 assert_equal "/clickhouse/tables/02/${LOCAL_TABLE}"$'\t'"clickhouse-02" "$(query clickhouse-02 "$path_sql")" "неверные путь или имя реплики на второй ноде"
 printf 'ЗЕЛЁНО: пути собраны из shard (/01/ и /02/), имя реплики собрано из макроса replica.\n'
 
-printf 'Проверка 6/9: Distributed создаётся ON CLUSTER и передаёт данные между нодами...\n'
+printf 'Проверка 6/10: Distributed создаётся ON CLUSTER и передаёт данные между нодами...\n'
 query clickhouse-01 "
     CREATE TABLE default.${DISTRIBUTED_TABLE} ON CLUSTER ${CLUSTER}
     AS default.${LOCAL_TABLE}
@@ -233,12 +245,12 @@ sharding_sql="SELECT countIf(_shard_num != cityHash64(ClientID) % 2 + 1), uniqEx
 assert_equal $'0\t2' "$(query clickhouse-02 "$sharding_sql")" "Distributed использует неверный ключ шардирования"
 printf 'ЗЕЛЁНО: локальная строка первой ноды читается со второй; ключ cityHash64(ClientID) разложил строки по двум шардам.\n'
 
-printf 'Проверка 7/9: в очереди распределённых DDL нет незавершённых заданий...\n'
+printf 'Проверка 7/10: в очереди распределённых DDL нет незавершённых заданий...\n'
 assert_ddl_queue_completed clickhouse-01 'после CREATE'
 assert_ddl_queue_completed clickhouse-02 'после CREATE'
 printf 'ЗЕЛЁНО: очередь содержит задания CREATE, незавершённых среди них нет.\n'
 
-printf 'Проверка 8/9: временные таблицы удаляются через ON CLUSTER...\n'
+printf 'Проверка 8/10: временные таблицы удаляются через ON CLUSTER...\n'
 query clickhouse-01 "DROP TABLE default.${DISTRIBUTED_TABLE} ON CLUSTER ${CLUSTER} SYNC" >/dev/null
 query clickhouse-01 "DROP TABLE default.${LOCAL_TABLE} ON CLUSTER ${CLUSTER} SYNC" >/dev/null
 remaining_sql="SELECT count() FROM system.tables WHERE database = 'default' AND name IN ('${LOCAL_TABLE}', '${DISTRIBUTED_TABLE}') FORMAT TSVRaw"
@@ -249,9 +261,25 @@ assert_ddl_queue_completed clickhouse-02 'после DROP'
 trap - EXIT INT TERM
 printf 'ЗЕЛЁНО: временные таблицы удалены; проверены завершённые задания CREATE и DROP.\n'
 
-# После снятия ловушек: своих объектов эта проверка не заводит и прибирать за
-# собой ей нечего — она только смотрит на то, что стенд произвёл сам.
-printf 'Проверка 9/9: стартовый мир в ods.event сходится с описью...\n'
+# После снятия ловушек: своих объектов эти проверки не заводят и прибирать за
+# собой им нечего — они только смотрят на то, что стенд произвёл сам.
+printf 'Проверка 9/10: словарь товаров отвечает на обеих нодах...\n'
+product_sql="SELECT
+    dictGet('dds.products', 'name', tuple('HOME-0001')),
+    dictGet('dds.products', 'category', tuple('HOME-0001')),
+    dictGet('dds.products', 'price', tuple('HOME-0001'))
+FORMAT TSV"
+expected_product="$(
+    awk -F, \
+        '$1 == "HOME-0001" { print $2 "\t" $3 "\t" $5; exit }' \
+        "$CATALOG"
+)"
+[[ -n "$expected_product" ]] || fail 'в каталоге нет эталонного sku HOME-0001'
+assert_equal "$expected_product" "$(query_as_etl clickhouse-01 "$product_sql")" "словарь товаров не ответил на первой ноде"
+assert_equal "$expected_product" "$(query_as_etl clickhouse-02 "$product_sql")" "словарь товаров не ответил на второй ноде"
+printf 'ЗЕЛЁНО: известный sku вернул имя, категорию и цену на обеих нодах.\n'
+
+printf 'Проверка 10/10: стартовый мир в ods.event сходится с описью...\n'
 check_starting_world
 
-printf 'ИТОГ: все 9 проверок кластера ClickHouse прошли.\n'
+printf 'ИТОГ: все 10 проверок кластера ClickHouse прошли.\n'
