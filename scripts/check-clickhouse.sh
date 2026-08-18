@@ -98,8 +98,9 @@ on_signal() {
 # этап 5 добавит следующий, — и голый счёт по таблице разойдётся с описью
 # законно, без всякой поломки.
 #
-# **Счёт идёт через FINAL** — правило репозитория для ODS, довод в storage.md:
-# голый `count()` по ReplacingMergeTree зависит от числа прошедших мержей.
+# **Счёт идёт через ods.event_v** — каноническую поверхность актуального
+# состояния ODS. Представление скрывает FINAL: потребителю не приходится
+# помнить, что голый `count()` по ReplacingMergeTree зависит от числа мержей.
 #
 # Таблица брака здесь не второе утверждение, а объяснение первого. Утверждай мы
 # «брака нет», проверка краснела бы навсегда после первого же урока, где менти
@@ -118,7 +119,7 @@ check_starting_world() {
 
     actual="$(query clickhouse-01 "
         SELECT EventDate, count()
-        FROM ods.event_dist FINAL
+        FROM ods.event_v
         WHERE EventDate BETWEEN '${first_date}' AND '${last_date}'
         GROUP BY EventDate
         ORDER BY EventDate
