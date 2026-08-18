@@ -150,3 +150,89 @@ SETTINGS ttl_only_drop_parts = 1;
 CREATE TABLE IF NOT EXISTS ods.event_errors_dist ON CLUSTER clickstream_cluster
 AS ods.event_errors_rep
 ENGINE = Distributed('clickstream_cluster', 'ods', 'event_errors_rep', cityHash64(raw));
+
+-- Локальная таблица версий заказа.
+--
+-- Слепок привозит состояние заказов окна изменяемости, а не поток изменений,
+-- и одна и та же сущность приезжает в нём много дней подряд. Поэтому строка
+-- здесь — версия заказа, а не запись слепка: ключ сущности order_id, колонка
+-- версии updated_at (время последнего изменения строки в источнике). Порядок
+-- версий решает источник, а не хранилище.
+--
+-- Четыре координаты отвечают на разные вопросы, и путать их нельзя:
+-- updated_at — какая бизнес-версия новее; snapshot_date — в слепке какого
+-- модельного дня источник показал строку; _load_id — какой запуск Airflow её
+-- принял; _load_ts — когда она приехала в хранилище. Ключом сущности не
+-- становится ни одна из трёх последних: они про наблюдение и загрузку.
+--
+-- PARTITION BY toDate(created_at) — по дню создания строки в источнике. Он
+-- неизменен у всех версий заказа, поэтому версии лежат в одной партиции и
+-- встречаются при мерже. Днём покупки этот день не является: бизнес-время
+-- живёт в событии purchase (docs/research/2026-08-16-order-snapshot-wire-format.md).
+--
+-- Замена партиции сюда не годится и заменена версиями: у прямого чтения Kafka
+-- нет признака конца слепка, а дата наблюдения не ключ публикации (ADR 0010).
+--
+-- items остаётся сырым фрагментом JSON: приём проверяет только, что это
+-- массив. Что внутри позиций — забота DDS, а не границы провода.
+CREATE TABLE IF NOT EXISTS ods.order_snapshot_rep ON CLUSTER clickstream_cluster
+(
+    order_id String,
+    user_id UInt64,
+    status LowCardinality(String),
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC'),
+    items_total Decimal(18, 2),
+    discount Decimal(18, 2),
+    delivery Decimal(18, 2),
+    total Decimal(18, 2),
+    items String,
+    snapshot_date Date,
+    _load_id String,
+    _load_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}', updated_at)
+PARTITION BY toDate(created_at)
+ORDER BY order_id;
+
+-- Лицо слоя: пишем и читаем через него. Ключ шардирования — cityHash64(order_id),
+-- и выбор здесь не про перекос, а про корректность: только так все версии
+-- одного заказа попадают на один шард, и FINAL через распределённую таблицу
+-- выбирает одного победителя, а не по победителю на шард.
+CREATE TABLE IF NOT EXISTS ods.order_snapshot_dist ON CLUSTER clickstream_cluster
+AS ods.order_snapshot_rep
+ENGINE = Distributed('clickstream_cluster', 'ods', 'order_snapshot_rep', cityHash64(order_id));
+
+-- Локальная таблица брака слепка.
+--
+-- Устроена как ods.event_errors_rep и по тем же доводам (см. выше): сырой
+-- текст, метаданные доставки, класс брака, нарезка по дню загрузки, месяц
+-- жизни, снятие кусками целиком. Своя колонка одна — _load_id: по нему видно,
+-- какой запуск привёз брак, и повтор задачи узнаётся по совпадению _load_id
+-- с координатами доставки.
+--
+-- Классы у заказов свои и их три: not_an_object, keyset_mismatch,
+-- field_invalid. Имя провалившегося поля в класс не входит — сырой текст лежит
+-- рядом, и единичный случай разбирается по нему, без постоянной детализации
+-- предиката (docs/architecture/orders/ingestion.md).
+CREATE TABLE IF NOT EXISTS ods.order_snapshot_errors_rep ON CLUSTER clickstream_cluster
+(
+    raw String,
+    error_class LowCardinality(String),
+    kafka_topic LowCardinality(String),
+    kafka_partition UInt64,
+    kafka_offset UInt64,
+    kafka_timestamp Nullable(DateTime64(3, 'UTC')),
+    consumer_host LowCardinality(String),
+    _load_id String,
+    _load_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
+PARTITION BY toDate(_load_ts)
+ORDER BY (error_class, kafka_partition, kafka_offset)
+TTL toDateTime(_load_ts) + INTERVAL 1 MONTH
+SETTINGS ttl_only_drop_parts = 1;
+
+CREATE TABLE IF NOT EXISTS ods.order_snapshot_errors_dist ON CLUSTER clickstream_cluster
+AS ods.order_snapshot_errors_rep
+ENGINE = Distributed('clickstream_cluster', 'ods', 'order_snapshot_errors_rep', cityHash64(raw));

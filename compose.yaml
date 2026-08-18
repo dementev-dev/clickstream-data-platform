@@ -71,6 +71,9 @@ x-airflow-common: &airflow-common
     KAFKA_ORDERS_TOPIC: orders
   volumes:
     - ./dags:/opt/airflow/dags:ro
+    # Запросы дагов: даг называет файл, а текст читает Airflow при исполнении
+    # задачи. Каталог тот же, что применяет DDL, — вся SQL стенда живёт в sql/.
+    - ./sql:/opt/airflow/sql:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
     - airflow_logs:/opt/airflow/logs
     - airflow_auth:/opt/airflow/auth
@@ -391,6 +394,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dags:/opt/airflow/dags:ro
+      - ./sql:/opt/airflow/sql:ro
       - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
       - airflow_logs:/opt/airflow/logs
       - airflow_auth:/opt/airflow/auth
