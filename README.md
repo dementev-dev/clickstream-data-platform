@@ -291,11 +291,24 @@ uv run --project generator python -m clickstream_generator batch \
 - `default` остаётся служебным: им ходят проверки здоровья и скрипты внутри
   контейнеров, но не приложения.
 
-Решение и его доводы — в [ADR 0007](docs/adr/0007-clickhouse-access.md).
+Почему пользователи объявлены файлом, а ноды доверяют общему секрету, — в
+[ADR 0007](docs/adr/0007-clickhouse-access.md).
 Пользователи и роли объявлены в `infra/clickhouse/users.d/access.xml`. Пароли и
 общий секрет нод живут в `.env` и передаются в конфигурацию через окружение;
 Superset получает пароль `bi` тем же путём через штатную функцию настройки.
 Значения для локального стенда есть в `.env.example`.
+
+Изменения значений ClickHouse в `.env` и файлов настройки серверов в
+`infra/clickhouse/config.d/` и `infra/clickhouse/users.d/` применяются
+пересозданием нод:
+
+```bash
+docker compose up --force-recreate --wait clickhouse-01 clickhouse-02
+```
+
+Команда возвращает управление, когда обе ноды снова здоровы; именованные тома
+при этом сохраняются. `docker compose restart` оставит прежнее окружение и
+может оставить старую версию отдельно смонтированного файла.
 
 Пароли ClickHouse и интерфейсов, пароли Postgres, ключи Airflow и Superset,
 отсутствие проверки доступа у Kafka и Prometheus — намеренно простые и явно
@@ -328,10 +341,6 @@ Superset получает пароль `bi` тем же путём через ш
 [официальным описанием автоматической настройки](https://grafana.com/docs/grafana/latest/administration/provisioning/).
 Prometheus собирает только встроенные метрики двух серверов и keeper; внешних
 сборщиков, панелей и правил оповещения пока нет.
-После изменения `infra/clickhouse/config.d/prometheus.xml` выполните
-`docker compose restart clickhouse-01 clickhouse-02`: обычный `make up` не
-перезапускает уже созданные серверы и они продолжают работать со старой
-конфигурацией.
 
 Airflow закреплён на 3.3.0. Состав обязательных процессов, LocalExecutor,
 публичный `airflow.sdk`, API здоровья и SimpleAuthManager сверены с
