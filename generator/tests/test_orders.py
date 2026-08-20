@@ -16,6 +16,7 @@ import pytest
 from numpy.typing import NDArray
 
 from clickstream_generator import catalog, commerce, day, orders, plan, schema, world
+from clickstream_generator.inventory import STARTING_DAYS
 from clickstream_generator.seeds import CANONICAL_SEED, Component
 
 WEEKDAY = 2
@@ -34,9 +35,15 @@ def weekday() -> day.Day:
 
 
 @pytest.fixture(scope="module")
-def week() -> list[day.Day]:
+def start_world() -> list[day.Day]:
+    """Восемь дней, которыми `make up` наполняет пустой стенд."""
+    return [day.stream(CANONICAL_SEED, number) for number in range(STARTING_DAYS)]
+
+
+@pytest.fixture(scope="module")
+def week(start_world: list[day.Day]) -> list[day.Day]:
     """Неделя мира: назначенные пары покупают в разные дни."""
-    return [day.stream(CANONICAL_SEED, number) for number in range(WEEK)]
+    return start_world[:WEEK]
 
 
 def purchases_of(events: day.Day) -> dict[str, NDArray[Any]]:
@@ -120,39 +127,59 @@ def test_the_order_repeats_the_purchase_up_to_one_dropped_line(weekday: day.Day)
     assert deltas > 0
 
 
-def test_the_discount_comes_from_the_coupon_of_the_event(weekday: day.Day):
-    """Промокод в событии обязан обернуться скидкой — иначе данные соврут."""
+def test_the_discount_comes_from_the_coupon_of_the_event(
+    start_world: list[day.Day],
+):
+    """Промокод даёт скидку на корзину, которую склад оставил в заказе."""
     percent = dict(world.COUPONS)
-    events = purchases_of(weekday)
-    codes = [cell[0] for cell in events["purchaseCoupon"]]
-    assert sum(1 for code in codes if code) > 10
+    discounted_delta = 0
 
-    for number, code in enumerate(codes):
-        # Скидка берётся от клиентской выручки, и складская дельта её не
-        # пересчитывает. В событии выручка дробная, у заказа — копейки.
-        revenue = round(events["purchaseRevenue"][number][0] * commerce.KOPECKS)
-        expected = revenue * percent[code] // 100 if code else 0
-        assert weekday.orders.discount[number] == expected
-        # Скидка без кода не берётся ниоткуда, а с кодом не съедает заказ:
-        # мерой заказа здесь та же исходная выручка, что и у самой скидки.
-        assert weekday.orders.discount[number] < revenue
+    for today in start_world:
+        money = today.orders
+        events = purchases_of(today)
+        codes = [cell[0] for cell in events["purchaseCoupon"]]
+        for number, code in enumerate(codes):
+            items_total = money.items_total[number]
+            expected = items_total * percent[code] // 100 if code else 0
+            assert money.discount[number] == expected, money.order_id[number]
+            assert money.discount[number] < items_total
+
+            revenue = round(events["purchaseRevenue"][number][0] * commerce.KOPECKS)
+            discounted_delta += int(bool(code) and items_total != revenue)
+
+    # Иначе проверка не отличила бы новую базу скидки от прежней.
+    assert discounted_delta > 0
 
 
-def test_the_money_of_an_order_adds_up(weekday: day.Day):
-    """`total` = `items_total` − `discount` + `delivery`, целыми копейками."""
-    money = weekday.orders
-    assert np.array_equal(
-        money.total, money.items_total - money.discount + money.delivery
-    )
-    for column in (money.items_total, money.discount, money.delivery, money.total):
-        assert np.issubdtype(column.dtype, np.integer)
-        assert np.all(column >= 0)
+def test_the_money_of_start_world_orders_adds_up(start_world: list[day.Day]):
+    """Деньги всех восьми стартовых дней целые, связные и неотрицательные."""
+    deliveries: set[int] = set()
+
+    for today in start_world:
+        money = today.orders
+        assert np.array_equal(
+            money.total, money.items_total - money.discount + money.delivery
+        )
+        for name, column in (
+            ("items_total", money.items_total),
+            ("discount", money.discount),
+            ("delivery", money.delivery),
+            ("total", money.total),
+        ):
+            assert np.issubdtype(column.dtype, np.integer)
+            negative = np.flatnonzero(column < 0).tolist()
+            assert not negative, (
+                today.day,
+                name,
+                [money.order_id[number] for number in negative],
+            )
+
+        deliveries.update(money.delivery.tolist())
 
     prices = {price for price, _ in world.DELIVERY_KOPECKS_WEIGHTS}
-    assert set(money.delivery.tolist()) == prices
     # Доставка — деньги, которых нет ни в одном событии: без неё «считаем по
     # бэкенду» ничего не значило бы.
-    assert np.any(money.total != money.items_total - money.discount)
+    assert deliveries == prices
 
 
 def test_every_order_leaves_the_window_with_one_of_three_fates(weekday: day.Day):
