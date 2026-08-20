@@ -9,20 +9,28 @@
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW ON default.*</query>
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON stg.*</query>
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON ods.*</query>
-                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY, dictGet, DROP TABLE, DROP VIEW, CREATE DATABASE ON dds.*</query>
+                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON dds.*</query>
                 <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE ON dm.*</query>
+                <!-- Зона справочников: etl применяет её DDL и читает словари из преобразований. -->
+                <query>GRANT SELECT, CREATE TABLE, CREATE DICTIONARY, dictGet, DROP TABLE, CREATE DATABASE ON dic.*</query>
                 <query>GRANT SELECT ON system.*</query>
                 <query>GRANT CLUSTER ON *.*</query>
                 <query>GRANT REMOTE ON *.*</query>
-                <!-- В 26.3 движок Kafka требует право на внешний источник. -->
+                <!--
+                  В 26.3 движки внешних источников требуют права на источник.
+                  Отказ при этом называет не источник, а `TABLE ENGINE ON File`
+                  — и права с таким именем не хватит: замерено, нужен FILE.
+                -->
                 <query>GRANT KAFKA ON *.*</query>
+                <query>GRANT FILE ON *.*</query>
             </grants>
         </etl_writer>
         <!-- Оба читателя: clickhouse-connect читает system.settings при подключении. -->
         <bi_reader>
             <grants>
-                <query>GRANT SELECT, dictGet ON dds.*</query>
+                <query>GRANT SELECT ON dds.*</query>
                 <query>GRANT SELECT ON dm.*</query>
+                <query>GRANT SELECT, dictGet ON dic.*</query>
                 <query>GRANT SELECT ON system.settings</query>
             </grants>
         </bi_reader>
@@ -30,11 +38,23 @@
             <grants>
                 <query>GRANT SELECT ON stg.*</query>
                 <query>GRANT SELECT ON ods.*</query>
-                <query>GRANT SELECT, dictGet ON dds.*</query>
+                <query>GRANT SELECT ON dds.*</query>
                 <query>GRANT SELECT ON dm.*</query>
+                <query>GRANT SELECT, dictGet ON dic.*</query>
                 <query>GRANT SELECT ON system.settings</query>
             </grants>
         </analyst_reader>
+        <!--
+          Словарь читает подложку не сам по себе, а от имени пользователя:
+          без явного user он идёт как default с пустым паролем и падает.
+          Пароля нет намеренно — ходить этой учёткой некуда, кроме локального
+          чтения одной базы, а пароль в тексте DDL означал бы секрет в git.
+        -->
+        <dict_reader>
+            <grants>
+                <query>GRANT SELECT ON dic.*</query>
+            </grants>
+        </dict_reader>
     </roles>
 
     <users>
@@ -62,5 +82,12 @@
                 <query>GRANT analyst_reader</query>
             </grants>
         </analyst>
+        <dict>
+            <no_password/>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT dict_reader</query>
+            </grants>
+        </dict>
     </users>
 </clickhouse>
