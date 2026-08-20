@@ -126,7 +126,9 @@ def orders(window: Sequence[Orders], day: int) -> list[bytes]:
 
 
 def _money(kopecks: int) -> str:
-    """Копейки — строкой с ровно двумя знаками: `129990` → `1299.90`."""
+    """Неотрицательные копейки — строкой с двумя знаками: `129990` → `1299.90`."""
+    if kopecks < 0:
+        raise ValueError(f"деньги не могут быть отрицательными: {kopecks}")
     return f"{kopecks // 100}.{kopecks % 100:02d}"
 
 

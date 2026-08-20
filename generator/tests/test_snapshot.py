@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 from contextlib import closing
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -128,6 +129,16 @@ def test_the_record_matches_the_wire_contract(days: list[day_module.Day]):
 
         if _born(record) == _date(SHORT_WINDOW_DAY):
             assert record["created_at"][:19] + "Z" == bought[record["order_id"]]
+
+
+def test_negative_money_does_not_leave_the_source(days: list[day_module.Day]):
+    """Сериализатор отвергает деньги, которых контракт провода не допускает."""
+    honest = days[0].orders
+    total = honest.total.copy()
+    total[0] = -1
+
+    with pytest.raises(ValueError):
+        serialize.orders([replace(honest, total=total)], honest.day)
 
 
 def test_the_moments_carry_real_milliseconds(days: list[day_module.Day]):

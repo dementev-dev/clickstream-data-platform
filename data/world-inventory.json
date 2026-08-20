@@ -56,37 +56,37 @@
     {
       "day": 0,
       "date": "2026-06-01",
-      "sha256": "98736f45970f65e04256cd3c108a07332a7276769b7a5dbf8b5617b75116a3c3"
+      "sha256": "6c3e3c1c8689ec23f53f0953db1b941e6f010e9e56a74d8d017f40195d3dec17"
     },
     {
       "day": 1,
       "date": "2026-06-02",
-      "sha256": "141c593f939eb695b8b639d9f47cc92efb5de1aa2aeffbc5f3abac63fa603628"
+      "sha256": "9acb523cfd47f3d97d55122025852982ba5a1d8362036308ce72a4d9fb767f43"
     },
     {
       "day": 2,
       "date": "2026-06-03",
-      "sha256": "c6f594f03bf1bba119bf591d5232fe6ce8d3793effab64d2171208f267ff8cac"
+      "sha256": "b81482491c4c0b874ea84d5f3f05144100c906dacc059c068b331df258b97172"
     },
     {
       "day": 3,
       "date": "2026-06-04",
-      "sha256": "382b20303450bbb7928e1f118cf36cc005c6d6747a215715c5d5c8dce0822f95"
+      "sha256": "9d1ab326c4bf8b78c9fcaf7015d8029f9ad4cff5558b89c730eb428d175cc9ee"
     },
     {
       "day": 4,
       "date": "2026-06-05",
-      "sha256": "ef743bad81a87725a767be45bfb18dfc74c20173ba0da5c41ccf254640c5af76"
+      "sha256": "0e30d0e192e121121003c0cc9aaa55e24924afb983caff15ab105705fbf2bd00"
     },
     {
       "day": 5,
       "date": "2026-06-06",
-      "sha256": "1618cf0f9a6816a1e302e0518a067cd4c7ca295dd1b7f4660c73f77da5182dfe"
+      "sha256": "9a2ad812fcff9a40a988f24f8aa4fc7a379873d173a95ddacd438592aed0bfb5"
     },
     {
       "day": 6,
       "date": "2026-06-07",
-      "sha256": "4e32a4cc9a8cc997fbb4bdf4727c22eb3a763e0d262262eccfe6a3094a14d142"
+      "sha256": "e1706a27ff55de489a505489148c7a959329d95ad6597d92d3f78505f67bb221"
     }
   ]
 }

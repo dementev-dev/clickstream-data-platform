@@ -11,10 +11,11 @@
 **Деньги — целыми копейками**, как и везде в генераторе: `items_total` —
 сумма позиций, посчитанная торговой половиной (у клиента то же число зовётся
 выручкой), за вычетом строки, которую унесла дельта; `discount` — скидка по
-промокоду события, по таблице «код → скидка» из чисел мира; `delivery` —
-единственные деньги заказа, которых нет ни в одном событии; `total` —
-`items_total` − `discount` + `delivery`. Отсюда правило витрин «деньги
-считаем по бэкенду»: про скидку и доставку клиент не знает вовсе.
+промокоду события от оставшегося `items_total`, по таблице «код → скидка» из
+чисел мира; `delivery` — единственные деньги заказа, которых нет ни в одном
+событии; `total` — `items_total` − `discount` + `delivery`. Отсюда правило
+витрин «деньги считаем по бэкенду»: про скидку и доставку клиент не знает
+вовсе.
 
 **Случайность — подпоток заказной стороны**, ветвящийся по дню рождения
 заказа: слепок несёт семь дней рождения сразу и судьбу каждого заказа обязан
@@ -114,7 +115,7 @@ def of_day(seed: int, day: int, purchases: Purchases) -> Orders:
     outcome, paid_after, cancelled_after = _fate(rng, len(purchases))
     product, quantity, items_total = _delta(rng, purchases)
     created_at = _created_at(rng, purchases)
-    discount = _discount(purchases)
+    discount = _discount(purchases, items_total)
     return Orders(
         day=day,
         order_id=purchases.order_id,
@@ -262,17 +263,18 @@ def _delta(
     return tuple(product), tuple(quantity), items_total
 
 
-def _discount(purchases: Purchases) -> NDArray[np.int64]:
-    """Скидка каждого заказа: процент промокода от клиентской выручки, вниз.
+def _discount(
+    purchases: Purchases, items_total: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Скидка каждого заказа: процент промокода от оставшейся корзины, вниз.
 
     Броска здесь нет: код выбрал посетитель, и он уже уехал в событие —
     бэкенду остаётся прочитать таблицу. Заказ без кода скидки не получает,
-    а спорную копейку округление оставляет магазину. Складская дельта скидку
-    не пересчитывает: `total` заказа с дельтой убывает ровно на стоимость
-    ушедшей строки.
+    а спорную копейку округление оставляет магазину. Склад сначала вычёркивает
+    отсутствующую позицию, поэтому скидка считается уже от `items_total`.
     """
     percent = np.array(
         [_DISCOUNT_PERCENT[code] if code else 0 for code in purchases.coupon],
         dtype=np.int64,
     )
-    return purchases.revenue * percent // 100
+    return items_total * percent // 100
