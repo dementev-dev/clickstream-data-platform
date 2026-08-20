@@ -1,4 +1,4 @@
--- Базы слоёв хранилища.
+-- Базы хранилища: слои цепочки и зона справочников.
 --
 -- Файлы этой папки применяются по порядку имён с ноды 1 и всегда ON CLUSTER:
 -- объекты обязаны появиться на обеих нодах, иначе распределённая таблица
@@ -14,5 +14,11 @@ CREATE DATABASE IF NOT EXISTS stg ON CLUSTER clickstream_cluster;
 -- порядок файлов от этого не зависит.
 CREATE DATABASE IF NOT EXISTS ods ON CLUSTER clickstream_cluster;
 
--- DDS начинается со словаря товаров; таблицы слоя появятся на следующем этапе.
+-- Объекты DDS появятся на следующем этапе; база заводится заранее по той же
+-- причине, что и ODS.
 CREATE DATABASE IF NOT EXISTS dds ON CLUSTER clickstream_cluster;
+
+-- Справочники стоят вне цепочки STG → ODS → DDS → DM: в хранилище их никто не
+-- производит, а читают их несколько слоёв — ADR 0012. Порядок слоёв к зоне не
+-- применяется, её файл идёт сразу за этим.
+CREATE DATABASE IF NOT EXISTS dic ON CLUSTER clickstream_cluster;

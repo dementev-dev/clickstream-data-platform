@@ -264,10 +264,13 @@ printf 'ЗЕЛЁНО: временные таблицы удалены; пров
 # После снятия ловушек: своих объектов эти проверки не заводят и прибирать за
 # собой им нечего — они только смотрят на то, что стенд произвёл сам.
 printf 'Проверка 9/10: словарь товаров отвечает на обеих нодах...\n'
+# Цену словарь отдаёт в Decimal(18, 2), а каталог хранит целые копейки. Умножаем
+# обратно и сравниваем с колонкой файла: так проверка заодно утверждает, что
+# приведение в источнике словаря точное, а не только что словарь отвечает.
 product_sql="SELECT
-    dictGet('dds.products', 'name', tuple('HOME-0001')),
-    dictGet('dds.products', 'category', tuple('HOME-0001')),
-    dictGet('dds.products', 'price', tuple('HOME-0001'))
+    dictGet('dic.products', 'name', tuple('HOME-0001')),
+    dictGet('dic.products', 'category', tuple('HOME-0001')),
+    toInt64(dictGet('dic.products', 'price', tuple('HOME-0001')) * 100)
 FORMAT TSV"
 expected_product="$(
     awk -F, \
