@@ -58,6 +58,23 @@ jq -e '
     )
 ' >/dev/null <<<"$config_json"
 jq -e '
+    .services as $services |
+    ["kafka-init", "clickhouse-init", "world-init", "world-snapshots"] |
+    all(. as $name | $services | has($name) | not)
+' >/dev/null <<<"$config_json"
+jq -e '
+    .services.generator as $generator |
+    ((($generator.depends_on // {}) | has("kafka-init")) | not) and
+    ((($generator.depends_on // {}) | has("clickhouse-init")) | not)
+' >/dev/null <<<"$config_json"
+jq -e '
+    .services["airflow-scheduler"] as $service |
+    ($service.environment.CLICKHOUSE_LIFECYCLE_PASSWORD | length > 0) and
+    any($service.volumes[]; .target == "/opt/airflow/world/generator" and .read_only) and
+    any($service.volumes[]; .target == "/opt/airflow/world/data" and .read_only) and
+    any($service.volumes[]; .target == "/opt/airflow/world/.dockerignore" and .read_only)
+' >/dev/null <<<"$config_json"
+jq -e '
     .services["airflow-init"] as $service |
     ($service.environment.AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE ==
       "/opt/airflow/auth/simple_auth_manager_passwords.json") and

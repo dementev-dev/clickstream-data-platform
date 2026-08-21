@@ -94,7 +94,7 @@ ENGINE = Distributed('clickstream_cluster', 'stg', 'hits_raw_rep', cityHash64(ra
 
 -- Чтец топика orders. Матвью к нему не привязана: слепок забирает прямым
 -- SELECT даг orders_ingest. Почему пулл, почему без матвью и почему у топика
--- одна партиция — ADR 0008; сам топик создаёт kafka-init в compose.yaml.
+-- одна партиция — ADR 0008; сам топик заранее создаёт world_initialize.
 --
 -- Без ON CLUSTER: таблица нужна только на clickhouse-01 — той ноде, к которой
 -- у Airflow подключение, и она же одна читает топик.

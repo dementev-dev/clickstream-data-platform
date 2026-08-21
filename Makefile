@@ -4,22 +4,26 @@ GENERATOR_LIMIT ?=
 GENERATOR_SPEED ?=
 
 # Цели корня — про стенд; проверки генератора — в `generator/Makefile`.
-.PHONY: up down clean ps logs smoke check-clickhouse check-services config-test lint generate-batch generate-live
+.PHONY: up down clean rebuild-storage ps logs smoke check-clickhouse check-services config-test lint generate-batch generate-live
 
 # --- Жизнь стенда ---
 
-# Второй шаг: `--wait` дожидается служб, а приём событий асинхронный — довод
-# целиком в шапке скрипта.
+# Compose дожидается инфраструктуры, Airflow — готового прикладного мира.
 up:
-	$(COMPOSE) up --detach --build --wait --wait-timeout 600
-	COMPOSE_BIN="$(COMPOSE)" ./scripts/wait-for-world.sh
-	COMPOSE_BIN="$(COMPOSE)" ./scripts/ingest-starting-orders.sh
+	$(COMPOSE) up --detach --build --wait --wait-timeout 600 --remove-orphans
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/run-dag.sh world_initialize
 
 down:
 	$(COMPOSE) down --remove-orphans
 
+# Полное удаление стенда, а не способ получить чистые данные перед проверкой.
+# Граница операции и требование к обоснованию — в AGENTS.md.
 clean:
 	$(COMPOSE) down --volumes --remove-orphans
+
+# Возврат прикладного мира к началу без удаления инфраструктурных томов.
+rebuild-storage:
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/run-dag.sh world_recreate
 
 ps:
 	$(COMPOSE) ps

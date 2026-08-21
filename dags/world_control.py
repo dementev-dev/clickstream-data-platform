@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime
 import os
 
+from airflow.exceptions import AirflowException
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import Param, Variable, dag, get_current_context, task
@@ -45,8 +46,8 @@ GENERATOR_ENVIRONMENT = {
 ORDERS_TOPIC = os.environ["KAFKA_ORDERS_TOPIC"]
 STARTING_DAYS = int(os.environ["WORLD_STARTING_DAYS"])
 
-# Позиция на оси: номер первого несыгранного дня. Переменной нет — мир в
-# стартовом состоянии, и играть надо сразу за ним.
+# Позиция на оси: номер первого несыгранного дня. До конца инициализации
+# работники не имеют права угадывать её — состояние объяснено в ADR 0013.
 #
 # Позиция ставится, а не увеличивается. Наложись один прогон на другой, худшее
 # при таком правиле — сыгранный дважды день, а повтор схлопнет
@@ -69,7 +70,24 @@ TAGS = ["пульт мира"]
 @task
 def first_unplayed_day() -> int:
     """Номер дня, с которого играть."""
-    return int(Variable.get(WORLD_POSITION, default=STARTING_DAYS))
+    raw_position = Variable.get(WORLD_POSITION, default=None)
+    if raw_position is None:
+        raise AirflowException(
+            "мир ещё не создан: выполните make up и дождитесь world_initialize"
+        )
+    try:
+        position = int(raw_position)
+    except (TypeError, ValueError) as error:
+        raise AirflowException(
+            f"world_position={raw_position!r} не является номером дня; "
+            "выполните make rebuild-storage"
+        ) from error
+    if position < STARTING_DAYS:
+        action = (
+            "выполните make up" if position == 0 else "выполните make rebuild-storage"
+        )
+        raise AirflowException(f"мир не готов: world_position={position}; {action}")
+    return position
 
 
 def _generator(task_id: str, command: list[str]) -> DockerOperator:
