@@ -56,7 +56,9 @@ def _clickhouse_client():
         password=connection.password,
         database=connection.schema or "default",
         connect_timeout=5,
-        send_receive_timeout=60,
+        # `ON CLUSTER` ждёт хосты до 180 с. Транспорт живёт дольше, чтобы
+        # ClickHouse сам назвал незавершённый хост вместо сетевого тайм-аута.
+        send_receive_timeout=300,
     )
 
 
@@ -97,7 +99,10 @@ def _generator(task_id: str, command: list[str]) -> DockerOperator:
             "KAFKA_BOOTSTRAP_SERVERS": KAFKA_BOOTSTRAP_SERVERS,
             "KAFKA_TOPIC": HITS_TOPIC,
         },
+        # Вывод уже переехал в журнал задачи; завершённый контейнер не нужен.
         auto_remove="force",
+        # Временный путь Airflow существует внутри контейнера, но монтировать
+        # его пытается хостовый Docker. Генератору этот каталог не нужен.
         mount_tmp_dir=False,
     )
 
@@ -260,7 +265,9 @@ def world_initialize():
         finally:
             client.close()
         raise AirflowException(
-            f"стартовый мир не принят за 300 с: строк {arrived} из {expected}"
+            f"стартовый мир не принят за 300 с: строк {arrived} из {expected}; "
+            "проверьте журнал send_initial_events и "
+            "SELECT * FROM system.kafka_consumers"
         )
 
     @task

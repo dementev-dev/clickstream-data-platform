@@ -46,10 +46,6 @@ x-kafka-target: &kafka-target
   <<: *kafka-common
   KAFKA_TOPIC: hits
 
-x-orders-kafka-target: &orders-kafka-target
-  <<: *kafka-common
-  KAFKA_TOPIC: *orders-topic
-
 x-world-starting-days: &world-starting-days "8"
 
 x-airflow-common: &airflow-common

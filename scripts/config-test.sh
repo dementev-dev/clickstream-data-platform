@@ -63,11 +63,6 @@ jq -e '
     all(. as $name | $services | has($name) | not)
 ' >/dev/null <<<"$config_json"
 jq -e '
-    .services.generator as $generator |
-    ((($generator.depends_on // {}) | has("kafka-init")) | not) and
-    ((($generator.depends_on // {}) | has("clickhouse-init")) | not)
-' >/dev/null <<<"$config_json"
-jq -e '
     .services["airflow-scheduler"] as $service |
     ($service.environment.CLICKHOUSE_LIFECYCLE_PASSWORD | length > 0) and
     any($service.volumes[]; .target == "/opt/airflow/world/generator" and .read_only) and
