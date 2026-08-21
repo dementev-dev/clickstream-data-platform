@@ -55,44 +55,6 @@
       }
     },
     {
-      "type": "timeseries",
-      "title": "Поток запросов: сколько выполнено и сколько упало",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 10
-      },
-      "options": {
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "timeseries",
-          "format": 0,
-          "rawSql": "SELECT\n    $__timeInterval(event_time) AS t,\n    countIf(type = 'QueryFinish') AS \"выполнено\",\n    countIf(type IN ('ExceptionBeforeStart', 'ExceptionWhileProcessing')) AS \"упало\"\nFROM clusterAllReplicas('clickstream_cluster', system.query_log)\nWHERE $__timeFilter(event_time)\n    AND is_initial_query\nGROUP BY t\nORDER BY t"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
       "type": "table",
       "title": "Кто спрашивает: сколько запросов и какой у них аппетит",
       "datasource": {
@@ -101,8 +63,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 16,
-        "x": 8,
+        "w": 24,
+        "x": 0,
         "y": 10
       },
       "options": {},
@@ -116,7 +78,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT\n    if(empty(user), 'фоновая работа сервера', user) AS \"Кто\",\n    count() AS \"Запросов\",\n    sum(read_rows) AS \"Прочитано строк\",\n    max(read_rows) AS \"Самый читающий, строк\",\n    max(memory_usage) AS \"Самый прожорливый, память\",\n    round(quantile(0.9)(query_duration_ms)) AS \"Девять из десяти быстрее, мс\"\nFROM clusterAllReplicas('clickstream_cluster', system.query_log)\nWHERE $__timeFilter(event_time)\n    AND type != 'QueryStart'\n    AND is_initial_query\nGROUP BY \"Кто\"\nORDER BY \"Прочитано строк\" DESC"
+          "rawSql": "SELECT\n    if(empty(user), 'фоновая работа сервера', user) AS \"Кто\",\n    count() AS \"Запросов\",\n    sum(read_rows) AS \"Прочитано строк\",\n    max(memory_usage) AS \"Самый прожорливый, память\",\n    round(quantile(0.9)(query_duration_ms)) AS \"Девять из десяти быстрее, мс\"\nFROM clusterAllReplicas('clickstream_cluster', system.query_log)\nWHERE $__timeFilter(event_time)\n    AND type != 'QueryStart'\n    AND is_initial_query\nGROUP BY \"Кто\"\nORDER BY \"Прочитано строк\" DESC"
         }
       ],
       "fieldConfig": {
@@ -145,7 +107,7 @@
         "uid": "clickhouse"
       },
       "gridPos": {
-        "h": 7,
+        "h": 8,
         "w": 24,
         "x": 0,
         "y": 18
