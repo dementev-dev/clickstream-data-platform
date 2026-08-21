@@ -31,6 +31,26 @@ jq -e '
     .services.superset.image == "clickstream-superset:local"
 ' >/dev/null <<<"$config_json"
 jq -e '
+    .services.grafana.image == "clickstream-grafana:local" and
+    any(
+        .services.grafana.volumes[];
+        (.source | endswith("/infra/grafana/provisioning/dashboards")) and
+        .target == "/etc/grafana/provisioning/dashboards" and
+        .read_only == true
+    )
+' >/dev/null <<<"$config_json"
+jq -e '
+    .services.grafana.environment.CLICKHOUSE_GRAFANA_PASSWORD as $password |
+    ($password | length > 0) and
+    .services["clickhouse-01"].environment.CLICKHOUSE_GRAFANA_PASSWORD == $password and
+    .services["clickhouse-02"].environment.CLICKHOUSE_GRAFANA_PASSWORD == $password
+' >/dev/null <<<"$config_json"
+jq -e '
+    .services["kafka-exporter"].image == "danielqsj/kafka-exporter:v1.9.0" and
+    .services["kafka-exporter"].command == ["--kafka.server=kafka:9092"] and
+    .services["kafka-exporter"].depends_on.kafka.condition == "service_healthy"
+' >/dev/null <<<"$config_json"
+jq -e '
     .services["airflow-init"].image == "clickstream-airflow:local" and
     all(
         .services[];

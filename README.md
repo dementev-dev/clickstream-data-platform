@@ -9,10 +9,10 @@
 [«Боевой реализм стенда (v2)»](docs/specs/2026-07-30-stand-v2-realism.md).
 Сейчас работают кластер ClickHouse из двух шардов, отдельный
 clickhouse-keeper, односерверная Kafka в режиме KRaft, Airflow 3.3, Superset,
-Prometheus, Grafana и общая база Postgres для метаданных. Генератор
-кликстрима в [`generator/`](generator/) собран целиком со стороны клиента: у
-него есть контракт схемы события, из которого собрано
-[описание выгрузки](docs/formats/clickstream-event.md), модельный мир и
+Prometheus, Grafana, экспортёр метрик Kafka и общая база Postgres для
+метаданных. Генератор кликстрима в [`generator/`](generator/) собран
+целиком со стороны клиента: у него есть контракт схемы события, из которого
+собрано [описание выгрузки](docs/formats/clickstream-event.md), модельный мир и
 проигрыватель, отправляющий дни в Kafka или в файл. События доезжают до
 типизированного `ods.event`, а `make up` наполняет стенд стартовым миром —
 первой неделей модельного времени.
@@ -63,9 +63,9 @@ make check-services
 все локальные данные стенда, а следующий `make up` создаст их с новыми
 значениями.
 
-`make up` собирает локальные образы Airflow и Superset, поднимает весь стенд и
-ждёт здорового состояния долгоживущих контейнеров. В образ Airflow добавлены
-закреплённые клиенты ClickHouse и Kafka. Одноразовые `airflow-init` и
+`make up` собирает локальные образы Airflow, Superset и Grafana, поднимает весь
+стенд и ждёт здорового состояния долгоживущих контейнеров. В образ Airflow
+добавлены закреплённые клиенты ClickHouse и Kafka. Одноразовые `airflow-init` и
 `superset-init` завершаются с кодом 0. Первый обновляет схему Airflow,
 подготавливает администратора и подключение к `clickhouse-01`. Второй обновляет
 Superset, создаёт администратора и импортирует подключение к `clickhouse-02`.
@@ -73,13 +73,13 @@ Superset, создаёт администратора и импортирует 
 
 `make smoke` за секунды спрашивает, собран ли стенд: зависимости машины,
 здоровье контейнеров, устройство keeper, ответ Kafka с машины через отображённый
-порт, три цели Prometheus, источник Grafana, компоненты Airflow и подготовленное
-подключение к `clickhouse-01`. В конце проверка спрашивает у Docker, не убивало
-ли ядро что-нибудь в долгоживущих контейнерах за нехватку памяти и не включалась
-ли политика перезапуска: убитый контейнер Docker поднимает сам, и проверка
-состояния об этом промолчит.
+порт, четыре цели Prometheus, два источника Grafana, компоненты Airflow и
+подготовленное подключение к `clickhouse-01`. В конце проверка спрашивает у
+Docker, не убивало ли ядро что-нибудь в долгоживущих контейнерах за нехватку
+памяти и не включалась ли политика перезапуска: убитый контейнер Docker
+поднимает сам, и проверка состояния об этом промолчит.
 
-Одиннадцать проверок здоровья сразу после `make up --wait` повторяют то, чего
+Двенадцать проверок здоровья сразу после `make up --wait` повторяют то, чего
 Compose уже дождался: у каждой долгоживущей службы есть своя `healthcheck`.
 Оставлены они потому, что первый вопрос к стенду всё равно «всё ли живо», а
 ответ на него стоит меньше секунды. Устройство keeper — другое дело: он должен
@@ -268,12 +268,13 @@ uv run --project generator python -m clickstream_generator batch \
 - `clickhouse-02` — точка подключения Superset;
 - `clickhouse-keeper` — координатор кластера;
 - `kafka` — один брокер KRaft;
+- `kafka-exporter` — экспортёр метрик Kafka для Prometheus;
 - `postgres-metadata` — один Postgres с отдельными базами и пользователями
   `airflow` и `superset`;
 - `airflow-apiserver`, `airflow-scheduler` и `airflow-dag-processor` —
   Airflow 3.3 с LocalExecutor, без triggerer;
 - `superset` — интерфейс и подготовленное подключение ClickHouse;
-- `prometheus` и `grafana` — сбор и просмотр встроенных метрик ClickHouse.
+- `prometheus` и `grafana` — сбор и просмотр метрик ClickHouse и Kafka.
 
 С настройками из `.env.example` порты доступны только с локальной машины:
 
@@ -285,7 +286,7 @@ uv run --project generator python -m clickstream_generator batch \
 - Prometheus — `http://127.0.0.1:29090`;
 - Grafana — `http://127.0.0.1:23000`, пользователь `admin`, пароль `admin`.
 
-В ClickHouse пять пользователей:
+В ClickHouse шесть пользователей и пять ролей:
 
 - `etl` применяет DDL и подключает Airflow; роль `etl_writer` читает и пишет
   слои хранилища;
@@ -293,6 +294,8 @@ uv run --project generator python -m clickstream_generator batch \
   слои DDS и DM;
 - `analyst` предназначен для подключения человека и читает все слои и
   справочники;
+- `grafana` с ролью `monitoring_reader` подключает Grafana и читает все слои,
+  системные таблицы и данные со всех реплик кластера;
 - `dict` читает только базу `dic` и пароля не имеет: им словарь товаров ходит
   за своей подложкой;
 - `default` остаётся служебным: им ходят проверки здоровья и скрипты внутри
@@ -302,7 +305,7 @@ uv run --project generator python -m clickstream_generator batch \
 [ADR 0007](docs/adr/0007-clickhouse-access.md).
 Пользователи и роли объявлены в `infra/clickhouse/users.d/access.xml`. Пароли и
 общий секрет нод живут в `.env` и передаются в конфигурацию через окружение;
-Superset получает пароль `bi` тем же путём через штатную функцию настройки.
+Superset получает пароль `bi`, а Grafana — пароль `grafana` тем же путём.
 Значения для локального стенда есть в `.env.example`.
 
 Изменения значений ClickHouse в `.env` и файлов настройки серверов в
@@ -344,10 +347,13 @@ docker compose up --force-recreate --wait clickhouse-01 clickhouse-02
 серверы и keeper используют один образ. Настройки Kafka 4.3.1 сверены с
 [примером односерверного KRaft](https://github.com/apache/kafka/blob/4.3.1/docker/examples/docker-compose-files/single-node/plaintext/docker-compose.yml).
 Секция метрик взята из конфигурации закреплённого образа ClickHouse и проверена
-на серверах и keeper. Подготовка источника Grafana сверена с
-[официальным описанием автоматической настройки](https://grafana.com/docs/grafana/latest/administration/provisioning/).
-Prometheus собирает только встроенные метрики двух серверов и keeper; внешних
-сборщиков, панелей и правил оповещения пока нет.
+на серверах и keeper. Подготовка источников Grafana сверена с
+[официальным описанием автоматической настройки](https://grafana.com/docs/grafana/latest/administration/provisioning/)
+и [документацией плагина ClickHouse](https://grafana.com/docs/plugins/grafana-clickhouse-datasource/latest/configure/).
+Prometheus собирает встроенные метрики двух серверов и keeper, а через
+`kafka-exporter` — состояние Kafka. Устройство зоны описано в
+[справочнике мониторинга](docs/architecture/monitoring.md); панелей и правил
+оповещения пока нет.
 
 Airflow закреплён на 3.3.0. Состав обязательных процессов, LocalExecutor,
 публичный `airflow.sdk`, API здоровья и SimpleAuthManager сверены с

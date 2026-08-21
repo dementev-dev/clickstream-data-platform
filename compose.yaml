@@ -19,6 +19,7 @@ x-clickhouse-common: &clickhouse-common
     CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ANALYST_PASSWORD: ${CLICKHOUSE_ANALYST_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?Скопируйте .env.example в .env}
   depends_on:
     clickhouse-keeper:
       condition: service_healthy
@@ -212,6 +213,20 @@ services:
       timeout: 10s
       retries: 20
       start_period: 30s
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["--kafka.server=kafka:9092"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9308/metrics >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
 
   kafka-init:
     image: apache/kafka:4.3.1
@@ -504,7 +519,9 @@ services:
       start_period: 10s
 
   grafana:
-    image: grafana/grafana:13.1.1
+    image: clickstream-grafana:local
+    build:
+      context: ./infra/grafana
     restart: unless-stopped
     depends_on:
       prometheus:
@@ -516,8 +533,10 @@ services:
       GF_NEWS_NEWS_FEED_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?Скопируйте .env.example в .env}
     volumes:
       - ./infra/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infra/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:?Скопируйте .env.example в .env}:3000"

@@ -7,7 +7,7 @@
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 read -r -a COMPOSE_CMD <<<"${COMPOSE_BIN:-docker compose}"
 readonly -a LONG_LIVED_SERVICES=(
-    clickhouse-keeper clickhouse-01 clickhouse-02 kafka postgres-metadata
+    clickhouse-keeper clickhouse-01 clickhouse-02 kafka kafka-exporter postgres-metadata
     airflow-apiserver airflow-scheduler airflow-dag-processor
     superset prometheus grafana
 )

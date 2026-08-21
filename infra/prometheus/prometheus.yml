@@ -16,3 +16,9 @@ scrape_configs:
           - clickhouse-keeper:9363
         labels:
           role: keeper
+  - job_name: kafka
+    static_configs:
+      - targets:
+          - kafka-exporter:9308
+        labels:
+          role: exporter
