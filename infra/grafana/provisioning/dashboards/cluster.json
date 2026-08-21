@@ -1,0 +1,316 @@
+{
+  "uid": "cluster",
+  "title": "Кластер",
+  "timezone": "utc",
+  "schemaVersion": 42,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Процессор: сколько ядер занимает нода",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT\n    $__timeInterval(event_time) AS t,\n    hostName() AS node,\n    -- Процессорное время самого сервера. Метрики с именами OS* сняты с машины\n    -- целиком, и в них обе ноды показывали бы одно и то же число.\n    sum(ProfileEvent_OSCPUVirtualTimeMicroseconds) / 1e6 / $__interval_s AS \"ядер\"\nFROM clusterAllReplicas('clickstream_cluster', system.metric_log)\nWHERE $__timeFilter(event_time)\nGROUP BY t, node\nORDER BY t, node"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.node}",
+          "min": 0,
+          "decimals": 2
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Память: сколько нода занимает и сколько ей отведено",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT\n    $__timeInterval(event_time) AS t,\n    hostName() AS node,\n    -- Занятое меряется резидентной памятью: именно её ядро сравнивает с\n    -- пределом контейнера, когда решает, убить ли ноду.\n    maxIf(value, metric = 'MemoryResident') AS \"занято\",\n    maxIf(value, metric = 'CGroupMemoryTotal') AS \"коробка\"\nFROM clusterAllReplicas('clickstream_cluster', system.asynchronous_metric_log)\nWHERE $__timeFilter(event_time)\n    AND metric IN ('MemoryResident', 'CGroupMemoryTotal')\nGROUP BY t, node\nORDER BY t, node"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.name} · ${__field.labels.node}",
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "коробка.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Диски: сколько нода читает и пишет",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT\n    $__timeInterval(event_time) AS t,\n    hostName() AS node,\n    -- Байты, прошедшие через обращения к файлам: чтение из страничного кэша\n    -- тоже видно. Счётчики блочного устройства на вставке молчат.\n    sum(ProfileEvent_OSReadChars) / $__interval_s AS \"чтение\",\n    sum(ProfileEvent_OSWriteChars) / $__interval_s AS \"запись\"\nFROM clusterAllReplicas('clickstream_cluster', system.metric_log)\nWHERE $__timeFilter(event_time)\nGROUP BY t, node\nORDER BY t, node"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.name} · ${__field.labels.node}",
+          "min": 0,
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Части: сколько их у таблицы и по сколько строк в каждой",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    concat(database, '.', table) AS \"Таблица\",\n    hostName() AS \"Нода\",\n    count() AS \"Частей\",\n    sum(rows) AS \"Строк\",\n    round(sum(rows) / count()) AS \"Строк в части\",\n    sum(bytes_on_disk) AS \"На диске\"\nFROM clusterAllReplicas('clickstream_cluster', system.parts)\nWHERE active\nGROUP BY \"Таблица\", \"Нода\"\nORDER BY \"Частей\" DESC, \"Таблица\"\nLIMIT 15"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "На диске"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Слияния: сколько частей они съели и чего это стоило",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    concat(database, '.', table) AS \"Таблица\",\n    hostName() AS \"Нода\",\n    sum(length(merged_from)) AS \"Частей съело\",\n    count() AS \"Слияний\",\n    sum(rows) AS \"Строк переварило\",\n    round(sum(duration_ms) / 1000, 1) AS \"Заняло, с\",\n    max(peak_memory_usage) AS \"Пиковая память\"\nFROM clusterAllReplicas('clickstream_cluster', system.part_log)\nWHERE $__timeFilter(event_time)\n    AND event_type = 'MergeParts'\nGROUP BY \"Таблица\", \"Нода\"\nORDER BY \"Частей съело\" DESC, \"Таблица\"\nLIMIT 15"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Пиковая память"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Keeper: сколько узлов в дереве",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ClickHouseAsyncMetrics_KeeperZnodeCount",
+          "legendFormat": "узлов в дереве",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Распределённый DDL: что прошло по кластеру и чем кончилось",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 8,
+        "y": 16
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    query_create_time AS \"Создан\",\n    entry AS \"Запись\",\n    host AS \"Нода\",\n    status AS \"Состояние\",\n    query_duration_ms AS \"Заняло, мс\",\n    exception_text AS \"Ошибка\",\n    query AS \"Запрос\"\nFROM system.distributed_ddl_queue\nORDER BY entry DESC, \"Нода\"\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    }
+  ]
+}
