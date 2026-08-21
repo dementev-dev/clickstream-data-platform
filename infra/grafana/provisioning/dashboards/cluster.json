@@ -176,7 +176,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT\n    concat(database, '.', table) AS \"Таблица\",\n    hostName() AS \"Нода\",\n    count() AS \"Частей\",\n    sum(rows) AS \"Строк\",\n    round(sum(rows) / count()) AS \"Строк в части\",\n    sum(bytes_on_disk) AS \"На диске\"\nFROM clusterAllReplicas('clickstream_cluster', system.parts)\nWHERE active\n    AND database != 'system'\nGROUP BY \"Таблица\", \"Нода\"\nORDER BY \"Частей\" DESC, \"Таблица\", \"Нода\"\n"
+          "rawSql": "SELECT\n    concat(database, '.', table) AS \"Таблица\",\n    hostName() AS \"Нода\",\n    count() AS \"Частей\",\n    sum(rows) AS \"Строк\",\n    round(sum(rows) / count()) AS \"Строк в части\",\n    sum(bytes_on_disk) AS \"На диске\"\nFROM clusterAllReplicas('clickstream_cluster', system.parts)\nWHERE active\n    AND database != 'system'\nGROUP BY \"Таблица\", \"Нода\"\nORDER BY \"Таблица\", \"Нода\"\n"
         }
       ],
       "fieldConfig": {
@@ -199,7 +199,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Слияния: сколько частей они съедают в каждом слое",
+      "title": "Слияния: сколько частей они съедают",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -241,7 +241,8 @@
           }
         },
         "overrides": []
-      }
+      },
+      "interval": "1m"
     },
     {
       "type": "timeseries",
