@@ -5,8 +5,8 @@
 -- окажется лицом половины кластера. Имя кластера — clickstream_cluster,
 -- задано в infra/clickhouse/config.d/cluster.xml.
 --
--- Идемпотентность везде через IF NOT EXISTS: make up применяет эти файлы и
--- поверх живого тома.
+-- Идемпотентность везде через IF NOT EXISTS: world_initialize может повторить
+-- применение после оборванного первого запуска.
 
 CREATE DATABASE IF NOT EXISTS stg ON CLUSTER clickstream_cluster;
 

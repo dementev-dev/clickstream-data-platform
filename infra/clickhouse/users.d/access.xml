@@ -25,6 +25,22 @@
                 <query>GRANT FILE ON *.*</query>
             </grants>
         </etl_writer>
+        <!-- Жизненный цикл мира: тот же канонический DDL, но с удалением баз. -->
+        <lifecycle_owner>
+            <grants>
+                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE, DROP DATABASE ON stg.*</query>
+                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE, DROP DATABASE ON ods.*</query>
+                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE, DROP DATABASE ON dds.*</query>
+                <query>GRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW, CREATE DATABASE, DROP DATABASE ON dm.*</query>
+                <query>GRANT SELECT, CREATE TABLE, CREATE DICTIONARY, dictGet, DROP TABLE, DROP DICTIONARY, CREATE DATABASE, DROP DATABASE ON dic.*</query>
+                <!-- clickhouse-connect читает эту таблицу при подключении. -->
+                <query>GRANT SELECT ON system.settings</query>
+                <query>GRANT CLUSTER ON *.*</query>
+                <query>GRANT REMOTE ON *.*</query>
+                <query>GRANT KAFKA ON *.*</query>
+                <query>GRANT FILE ON *.*</query>
+            </grants>
+        </lifecycle_owner>
         <!-- Оба читателя: clickhouse-connect читает system.settings при подключении. -->
         <bi_reader>
             <grants>
@@ -75,6 +91,13 @@
                 <query>GRANT etl_writer</query>
             </grants>
         </etl>
+        <lifecycle>
+            <password from_env="CLICKHOUSE_LIFECYCLE_PASSWORD"/>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT lifecycle_owner</query>
+            </grants>
+        </lifecycle>
         <bi>
             <password from_env="CLICKHOUSE_BI_PASSWORD"/>
             <quota>default</quota>

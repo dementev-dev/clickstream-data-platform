@@ -49,9 +49,9 @@ from clickstream_generator import serialize, world
 from clickstream_generator.catalog import CATALOG_PATH
 from clickstream_generator.seeds import CANONICAL_SEED
 
-# Сколько дней оси заливается в стенд при подъёме. То же число стоит у службы
-# `world-init` в compose.yaml: YAML не читает Python, и одно из двух мест —
-# лишнее по построению. Расхождение поймают счётчики make check-clickhouse.
+# Сколько дней оси описывает стартовый мир. То же число Airflow получает из
+# compose.yaml: YAML не читает Python, и одно из двух мест лишнее по построению.
+# Расхождение поймают счётчики make check-clickhouse.
 STARTING_DAYS = 8
 
 

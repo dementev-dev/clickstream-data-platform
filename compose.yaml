@@ -17,6 +17,7 @@ x-clickhouse-common: &clickhouse-common
     CLICKHOUSE_CLUSTER_SECRET: ${CLICKHOUSE_CLUSTER_SECRET:?Скопируйте .env.example в .env}
     CLICKHOUSE_DEFAULT_PASSWORD: ${CLICKHOUSE_DEFAULT_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_LIFECYCLE_PASSWORD: ${CLICKHOUSE_LIFECYCLE_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ANALYST_PASSWORD: ${CLICKHOUSE_ANALYST_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?Скопируйте .env.example в .env}
@@ -33,9 +34,8 @@ x-clickhouse-common: &clickhouse-common
     retries: 30
     start_period: 10s
 
-# Факты стенда, у которых стало по два потребителя: разовая служба генератора и
-# пульт мира. Названы по одному разу — иначе однажды разойдутся, и заметит это
-# не проверка, а менти с пустым топиком.
+# Факты генератора и пульта мира названы по одному разу — иначе они однажды
+# разойдутся, и заметит это не проверка, а менти с пустым топиком.
 x-generator-image: &generator-image clickstream-generator:local
 x-orders-topic: &orders-topic orders
 
@@ -45,10 +45,6 @@ x-kafka-common: &kafka-common
 x-kafka-target: &kafka-target
   <<: *kafka-common
   KAFKA_TOPIC: hits
-
-x-orders-kafka-target: &orders-kafka-target
-  <<: *kafka-common
-  KAFKA_TOPIC: *orders-topic
 
 x-world-starting-days: &world-starting-days "8"
 
@@ -73,9 +69,9 @@ x-airflow-common: &airflow-common
     AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:?Скопируйте .env.example в .env}
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
-    # Пульт мира поднимает генератор сам, отдельным контейнером, — значит те же
-    # факты стенда, что compose даёт разовой службе генератора, нужны и дагам.
-    # Имя сети собирается из имени проекта: у второй копии стенда оно другое.
+    CLICKHOUSE_LIFECYCLE_PASSWORD: ${CLICKHOUSE_LIFECYCLE_PASSWORD:?Скопируйте .env.example в .env}
+    # Пульт мира поднимает генератор отдельным контейнером. Имя сети собирается
+    # из имени проекта: у второй копии стенда оно другое.
     <<: *kafka-target
     GENERATOR_IMAGE: *generator-image
     STAND_NETWORK: ${COMPOSE_PROJECT_NAME}_default
@@ -86,6 +82,11 @@ x-airflow-common: &airflow-common
     # Запросы дагов: даг называет файл, а текст читает Airflow при исполнении
     # задачи. Каталог тот же, что применяет DDL, — вся SQL стенда живёт в sql/.
     - ./sql:/opt/airflow/sql:ro
+    # Инициализация мира собирает канонический образ из того же контекста, что
+    # ручной generator. Docker SDK архивирует эти файлы внутри задачи.
+    - ./generator:/opt/airflow/world/generator:ro
+    - ./data:/opt/airflow/world/data:ro
+    - ./.dockerignore:/opt/airflow/world/.dockerignore:ro
     - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
     - airflow_logs:/opt/airflow/logs
     - airflow_auth:/opt/airflow/auth
@@ -96,15 +97,6 @@ x-generator-common: &generator-common
     context: .
     dockerfile: generator/Dockerfile
   restart: "no"
-  depends_on:
-    kafka-init:
-      condition: service_completed_successfully
-    # Читать топик движок Kafka начинает не при своём создании, а когда над ним
-    # появляется матвью приёма, и она создаётся последней по номеру файла
-    # (sql/ddl/40-stg-views.sql). Отправь генератор события раньше — они лягут в
-    # топик и молча минуют хранилище.
-    clickhouse-init:
-      condition: service_completed_successfully
   environment:
     # Адрес брокера и имя топика — факты стенда, и называет их стенд.
     # Остальное (день, зерно, число дней, предел пачки) приходит аргументами
@@ -228,119 +220,6 @@ services:
       retries: 15
       start_period: 10s
 
-  kafka-init:
-    image: apache/kafka:4.3.1
-    restart: "no"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    entrypoint: ["/bin/bash", "-ec"]
-    command:
-      - |
-        topic_partition_count() {
-          /opt/kafka/bin/kafka-topics.sh \
-            --bootstrap-server kafka:9092 \
-            --describe \
-            --topic hits | \
-            sed -n '1s/.*PartitionCount: \([0-9][0-9]*\).*/\1/p'
-        }
-
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic hits \
-          --partitions 2 \
-          --replication-factor 1
-
-        partition_count="$$(topic_partition_count)"
-        # Брокер разрешает автосоздание, хотя потребитель ClickHouse его не запрашивает.
-        # На сохранённом томе другой клиент мог уже создать hits с одним разделом.
-        if [[ "$$partition_count" == "1" ]]; then
-          /opt/kafka/bin/kafka-topics.sh \
-            --bootstrap-server kafka:9092 \
-            --alter \
-            --topic hits \
-            --partitions 2
-          partition_count="$$(topic_partition_count)"
-        fi
-        if [[ "$$partition_count" != "2" ]]; then
-          printf 'ОШИБКА: у топика hits разделов: %s, ожидалось: 2.\n' \
-            "$${partition_count:-неизвестно}" >&2
-          exit 1
-        fi
-
-        # Топик заказов: одна партиция, читает его один чтец на ноде 1 —
-        # довод в ADR 0008.
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic orders \
-          --partitions 1 \
-          --replication-factor 1
-
-  # DDL применяется с ноды 1 по порядку имён файлов после готовности всего кластера.
-  clickhouse-init:
-    image: clickhouse/clickhouse-server:26.3.17.56
-    restart: "no"
-    depends_on:
-      kafka-init:
-        condition: service_completed_successfully
-      clickhouse-01:
-        condition: service_healthy
-      clickhouse-02:
-        condition: service_healthy
-    environment:
-      LC_ALL: C
-      CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
-    entrypoint: ["/bin/bash", "-ec"]
-    command:
-      - |
-        set -- /ddl/*.sql
-        if [[ ! -e "$$1" ]]; then
-          printf 'ОШИБКА: в /ddl нет файлов SQL.\n' >&2
-          exit 1
-        fi
-        for ddl_file do
-          printf 'Применяем %s.\n' "$${ddl_file##*/}"
-          clickhouse-client \
-            --host clickhouse-01 \
-            --user etl \
-            --password "$$CLICKHOUSE_ETL_PASSWORD" \
-            --multiquery \
-            --queries-file "$$ddl_file"
-        done
-    volumes:
-      - ./sql/ddl:/ddl:ro
-
-  # Стартовый мир: восемь модельных дней уезжают в топик при каждом подъёме.
-  # Что это за дни и каким мир обязан выйти — data/world-inventory.json.
-  #
-  # Число дней стоит здесь числом: YAML не читает Python, и одно из двух мест
-  # (второе — `STARTING_DAYS` в inventory.py) лишнее по построению. Правя одно,
-  # правьте второе — на страже тут никто не стоит: залей эта служба лишний
-  # день, он лёг бы за рамкой дат описи и остался бы незамеченным. Внутри YAML
-  # число одно на всех: то же говорит дагам пульта, где кончается стартовый мир.
-  #
-  # Повторный `make up` заливает мир заново, и это не оплошность: `WatchID` у
-  # событий те же, ReplacingMergeTree схлопнет повтор в ODS. Сырьё в STG при
-  # этом честно удвоится — свойство слоя, описанное в storage.md.
-  world-init:
-    <<: *generator-common
-    command: ["batch", "--day", "0", "--days", *world-starting-days]
-
-  # Второй источник стартового мира идёт после событий тем же генератором.
-  # Сдвиг команды snapshot оставляет день 7 первому ходу мира: за восемь
-  # дней уезжают семь слепков, дней 0…6.
-  world-snapshots:
-    <<: *generator-common
-    depends_on:
-      world-init:
-        condition: service_completed_successfully
-    environment: *orders-kafka-target
-    command: ["snapshot", "--day", "0", "--days", *world-starting-days]
-
   # Тот же образ для ручных прогонов: `make generate-batch`, `make generate-live`.
   # Под профилем — чтобы обычный подъём стенда её не трогал.
   generator:
@@ -385,14 +264,6 @@ services:
         condition: service_healthy
       clickhouse-01:
         condition: service_healthy
-      # Не убирать: без зависимого успешный clickhouse-init считается
-      # упавшим для --wait.
-      clickhouse-init:
-        condition: service_completed_successfully
-      # По той же причине. Слепки идут за событиями и замыкают цепь разовых
-      # служб; долгоживущие службы данных её не ждут, а `airflow-init` ждёт.
-      world-snapshots:
-        condition: service_completed_successfully
     entrypoint: ["/bin/bash"]
     command: ["/opt/airflow/init.sh"]
 
@@ -433,6 +304,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dags:/opt/airflow/dags:ro
       - ./sql:/opt/airflow/sql:ro
+      - ./generator:/opt/airflow/world/generator:ro
+      - ./data:/opt/airflow/world/data:ro
+      - ./.dockerignore:/opt/airflow/world/.dockerignore:ro
       - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
       - airflow_logs:/opt/airflow/logs
       - airflow_auth:/opt/airflow/auth
