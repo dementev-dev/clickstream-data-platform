@@ -22,7 +22,7 @@ FROM ods.event_dist FINAL;
 CREATE VIEW IF NOT EXISTS ods.order_v ON CLUSTER clickstream_cluster
 AS
 SELECT *
-FROM ods.order_snapshot_dist FINAL;
+FROM ods.order_dist FINAL;
 
 -- ODS: разбор сырья в событие и в таблицу ошибок.
 --
