@@ -4,7 +4,7 @@
 -- Разобранные значения берёт assumeNotNull: обнуляемый разбор стоит за
 -- предикатом, который NULL уже отсёк, и приведение здесь не может упасть.
 
-INSERT INTO ods.order_snapshot_dist
+INSERT INTO ods.order_dist
 {% include "ods/_order_wire_contract.sql" %}
 SELECT
     JSONExtractString(raw, 'order_id') AS order_id,
