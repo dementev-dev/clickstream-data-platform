@@ -351,9 +351,11 @@ docker compose up --force-recreate --wait clickhouse-01 clickhouse-02
 [официальным описанием автоматической настройки](https://grafana.com/docs/grafana/latest/administration/provisioning/)
 и [документацией плагина ClickHouse](https://grafana.com/docs/plugins/grafana-clickhouse-datasource/latest/configure/).
 Prometheus собирает встроенные метрики двух серверов и keeper, а через
-`kafka-exporter` — состояние Kafka. Устройство зоны описано в
-[справочнике мониторинга](docs/architecture/monitoring.md); панелей и правил
-оповещения пока нет.
+`kafka-exporter` — состояние Kafka. Поверх этого в Grafana поднимается дашборд
+«Данные»: свежесть, поток, брак, сходимость Kafka с ClickHouse, отставание
+чтения и дневной слепок заказов. Устройство зоны и разбор панелей — в
+[справочнике мониторинга](docs/architecture/monitoring.md); правил оповещения
+пока нет.
 
 Airflow закреплён на 3.3.0. Состав обязательных процессов, LocalExecutor,
 публичный `airflow.sdk`, API здоровья и SimpleAuthManager сверены с
