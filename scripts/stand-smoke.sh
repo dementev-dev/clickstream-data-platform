@@ -87,33 +87,37 @@ check_prometheus_targets() {
     targets_response="$(curl -sf "http://127.0.0.1:${port}/api/v1/targets?state=active" 2>/dev/null || true)"
     if jq -e '
         .status == "success" and
-        (.data.result | length == 3) and
+        (.data.result | length == 4) and
         ([.data.result[].metric.instance] | sort ==
-          ["clickhouse-01:9363", "clickhouse-02:9363", "clickhouse-keeper:9363"]) and
+          ["clickhouse-01:9363", "clickhouse-02:9363", "clickhouse-keeper:9363", "kafka-exporter:9308"]) and
         all(.data.result[]; .value[1] == "1")
     ' >/dev/null 2>&1 <<<"$response" && jq -e '
         .status == "success" and
-        (.data.activeTargets | length == 3) and
+        (.data.activeTargets | length == 4) and
         ([.data.activeTargets[].scrapeUrl] | sort == [
           "http://clickhouse-01:9363/metrics",
           "http://clickhouse-02:9363/metrics",
-          "http://clickhouse-keeper:9363/metrics"
+          "http://clickhouse-keeper:9363/metrics",
+          "http://kafka-exporter:9308/metrics"
         ]) and
         all(.data.activeTargets[]; .health == "up" and .lastError == "")
     ' >/dev/null 2>&1 <<<"$targets_response"; then
-        pass 'Prometheus видит ровно три цели ClickHouse, все со значением up=1'
+        pass 'Prometheus видит ровно четыре здоровые цели ClickHouse и Kafka'
     else
-        fail 'Prometheus не видит ровно три здоровые цели: clickhouse-01, clickhouse-02 и clickhouse-keeper'
+        fail 'Prometheus не видит ровно четыре здоровые цели: clickhouse-01, clickhouse-02, clickhouse-keeper и kafka-exporter'
     fi
 }
 
 check_grafana_datasource() {
+    local clickhouse_datasource
+    local clickhouse_response
     local config
+    local datasources
     local password
     local port
-    local datasource
     local provisioning_file_ok=0
-    local response
+    local prometheus_datasource
+    local prometheus_response
     local user
 
     config="$(compose config --format json 2>/dev/null || true)"
@@ -129,24 +133,64 @@ check_grafana_datasource() {
             grep -Eq "^[[:space:]]+url: http://prometheus:9090$" "$file"
             grep -Eq "^[[:space:]]+isDefault: true$" "$file"
             grep -Eq "^[[:space:]]+editable: false$" "$file"
+            file=/etc/grafana/provisioning/datasources/clickhouse.yml
+            test -r "$file"
+            grep -Eq "^[[:space:]]+uid: clickhouse$" "$file"
+            grep -Eq "^[[:space:]]+type: grafana-clickhouse-datasource$" "$file"
+            grep -Eq "^[[:space:]]+host: clickhouse-01$" "$file"
+            grep -Eq "^[[:space:]]+port: 9000$" "$file"
+            grep -Eq "^[[:space:]]+username: grafana$" "$file"
+            grep -Eq "^[[:space:]]+editable: false$" "$file"
         ' >/dev/null 2>&1 && provisioning_file_ok=1
-    datasource="$(curl -sf -u "${user}:${password}" \
+    datasources="$(curl -sf -u "${user}:${password}" \
+        "http://127.0.0.1:${port}/api/plugins?type=datasource" 2>/dev/null || true)"
+    prometheus_datasource="$(curl -sf -u "${user}:${password}" \
         "http://127.0.0.1:${port}/api/datasources/uid/prometheus" 2>/dev/null || true)"
-    response="$(curl -sf -u "${user}:${password}" \
+    prometheus_response="$(curl -sf -u "${user}:${password}" \
         "http://127.0.0.1:${port}/api/datasources/uid/prometheus/health" 2>/dev/null || true)"
-    if [[ "$provisioning_file_ok" -eq 1 ]] && jq -e '
+    clickhouse_datasource="$(curl -sf -u "${user}:${password}" \
+        "http://127.0.0.1:${port}/api/datasources/uid/clickhouse" 2>/dev/null || true)"
+    clickhouse_response="$(curl -sf -u "${user}:${password}" \
+        "http://127.0.0.1:${port}/api/datasources/uid/clickhouse/health" 2>/dev/null || true)"
+    if [[ "$provisioning_file_ok" -ne 1 ]]; then
+        fail 'Grafana не получила файлы настройки источников'
+        return
+    fi
+    if ! jq -e '
+        any(.[]; .id == "grafana-clickhouse-datasource")
+    ' >/dev/null 2>&1 <<<"$datasources"; then
+        fail 'Grafana не видит плагин ClickHouse'
+        return
+    fi
+    if ! jq -e '
         .uid == "prometheus" and
         .type == "prometheus" and
         .url == "http://prometheus:9090" and
         .access == "proxy" and
         .isDefault == true and
         .readOnly == true
-    ' >/dev/null 2>&1 <<<"$datasource" && \
-        jq -e '.status == "OK"' >/dev/null 2>&1 <<<"$response"; then
-        pass 'Grafana проверила файл настройки и подготовленный источник Prometheus с uid=prometheus'
-    else
-        fail 'Grafana не смогла проверить файл настройки и подготовленный источник Prometheus с uid=prometheus'
+    ' >/dev/null 2>&1 <<<"$prometheus_datasource" || \
+        ! jq -e '.status == "OK"' >/dev/null 2>&1 <<<"$prometheus_response"; then
+        fail 'Grafana не видит здоровый подготовленный источник Prometheus'
+        return
     fi
+    if ! jq -e '
+        .uid == "clickhouse" and
+        .type == "grafana-clickhouse-datasource" and
+        .access == "proxy" and
+        .isDefault == false and
+        .readOnly == true and
+        .jsonData.host == "clickhouse-01" and
+        .jsonData.port == 9000 and
+        .jsonData.protocol == "native" and
+        .jsonData.username == "grafana" and
+        .jsonData.defaultDatabase == "system"
+    ' >/dev/null 2>&1 <<<"$clickhouse_datasource" || \
+        ! jq -e '.status == "OK"' >/dev/null 2>&1 <<<"$clickhouse_response"; then
+        fail 'Grafana не видит здоровый подготовленный источник ClickHouse'
+        return
+    fi
+    pass 'Grafana видит плагин и два здоровых подготовленных источника'
 }
 
 # Три вопроса о связности, и все три Airflow отвечает сразу. Запуск пробников —
