@@ -70,6 +70,9 @@ jq -e '
 # обратная связь. Скрипты стенда проверять так незачем: их запускают с этой же
 # машины, и ошибка вылезает при первом же запуске с номером строки.
 PYTHONPYCACHEPREFIX="$CACHE_DIR" uv run --no-project python -m compileall -q "$ROOT_DIR/dags"
+# Дашборды Grafana — тот же случай и тот же довод: сломанный JSON не сообщает о
+# себе, а молча оставляет в интерфейсе прежнюю версию дашборда.
+jq -e . "$ROOT_DIR"/infra/grafana/provisioning/dashboards/*.json >/dev/null
 git -C "$ROOT_DIR" diff --check
 
-printf 'ЗЕЛЁНО: Compose, Python и пробельные ошибки diff проверены.\n'
+printf 'ЗЕЛЁНО: Compose, Python, дашборды и пробельные ошибки diff проверены.\n'

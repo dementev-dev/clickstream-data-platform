@@ -1,0 +1,236 @@
+{
+  "uid": "data",
+  "title": "Данные",
+  "timezone": "utc",
+  "schemaVersion": 42,
+  "refresh": "1m",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Свежесть: сколько прошло с последней доехавшей строки",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT dateDiff('second', max(_load_ts), now()) AS \"события\"\nFROM ods.event_dist"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT dateDiff('second', max(_load_ts), now()) AS \"заказы\"\nFROM ods.order_dist"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Брак: сколько приехавшего не разобралось",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 6,
+        "y": 0
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    source AS \"Источник\",\n    countIf(NOT is_error) AS \"Приехало\",\n    countIf(is_error) AS \"В брак\",\n    100 * countIf(is_error) / countIf(NOT is_error) AS \"Доля брака, %\"\nFROM\n(\n    SELECT 'события' AS source, 0 AS is_error, _load_ts FROM stg.hits_raw_dist\n    UNION ALL\n    SELECT 'события', 1, _load_ts FROM ods.event_errors_dist\n    UNION ALL\n    SELECT 'заказы', 0, _load_ts FROM stg.orders_raw_dist\n    UNION ALL\n    SELECT 'заказы', 1, _load_ts FROM ods.order_errors_dist\n)\nWHERE $__timeFilter(_load_ts)\nGROUP BY source\nORDER BY source"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Дневной слепок заказов: какой доехал и когда",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 0
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    JSONExtractString(raw, 'snapshot_date') AS \"Слепок\",\n    max(_load_ts) AS \"Доехал\",\n    count() AS \"Строк\"\nFROM stg.orders_raw_dist\nGROUP BY \"Слепок\"\nORDER BY \"Слепок\" DESC\nLIMIT 10"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Поток: сколько строк приезжает в слой сырья",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT\n    $__timeInterval(_load_ts) AS t,\n    count() AS \"события\"\nFROM stg.hits_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT\n    $__timeInterval(_load_ts) AS t,\n    count() AS \"заказы\"\nFROM stg.orders_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Сходимость: произведено в Kafka против приземлившегося в ClickHouse",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(kafka_topic_partition_current_offset{topic=\"hits\"}) - sum(kafka_topic_partition_current_offset{topic=\"hits\"} offset $__interval)",
+          "legendFormat": "произведено в Kafka",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT\n    -- Столбец подписан правым краем: ряд Kafka в этой точке — прирост офсета\n    -- за тот же интервал, а он набирается к его концу.\n    $__timeInterval(_load_ts) + INTERVAL $__interval_s SECOND AS t,\n    count() AS \"приземлилось в ClickHouse\"\nFROM stg.hits_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
+        }
+      ],
+      "interval": "1m"
+    },
+    {
+      "type": "timeseries",
+      "title": "Отставание чтения из Kafka: непрочитанных сообщений",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag)",
+          "legendFormat": "{{consumergroup}}",
+          "range": true
+        }
+      ]
+    }
+  ]
+}
