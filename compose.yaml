@@ -36,10 +36,18 @@ x-clickhouse-common: &clickhouse-common
 # пульт мира. Названы по одному разу — иначе однажды разойдутся, и заметит это
 # не проверка, а менти с пустым топиком.
 x-generator-image: &generator-image clickstream-generator:local
+x-orders-topic: &orders-topic orders
+
+x-kafka-common: &kafka-common
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
 x-kafka-target: &kafka-target
-  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  <<: *kafka-common
   KAFKA_TOPIC: hits
+
+x-orders-kafka-target: &orders-kafka-target
+  <<: *kafka-common
+  KAFKA_TOPIC: *orders-topic
 
 x-world-starting-days: &world-starting-days "8"
 
@@ -71,7 +79,7 @@ x-airflow-common: &airflow-common
     GENERATOR_IMAGE: *generator-image
     STAND_NETWORK: ${COMPOSE_PROJECT_NAME}_default
     WORLD_STARTING_DAYS: *world-starting-days
-    KAFKA_ORDERS_TOPIC: orders
+    KAFKA_ORDERS_TOPIC: *orders-topic
   volumes:
     - ./dags:/opt/airflow/dags:ro
     # Запросы дагов: даг называет файл, а текст читает Airflow при исполнении
@@ -307,6 +315,17 @@ services:
     <<: *generator-common
     command: ["batch", "--day", "0", "--days", *world-starting-days]
 
+  # Второй источник стартового мира идёт после событий тем же генератором.
+  # Сдвиг команды snapshot оставляет день 7 первому ходу мира: за восемь
+  # дней уезжают семь слепков, дней 0…6.
+  world-snapshots:
+    <<: *generator-common
+    depends_on:
+      world-init:
+        condition: service_completed_successfully
+    environment: *orders-kafka-target
+    command: ["snapshot", "--day", "0", "--days", *world-starting-days]
+
   # Тот же образ для ручных прогонов: `make generate-batch`, `make generate-live`.
   # Под профилем — чтобы обычный подъём стенда её не трогал.
   generator:
@@ -355,10 +374,9 @@ services:
       # упавшим для --wait.
       clickhouse-init:
         condition: service_completed_successfully
-      # По той же причине. Заливка стартового мира идёт последней в цепи
-      # разовых служб, и зависимого ей взять больше негде: долгоживущие службы
-      # данных не ждут, а `airflow-init` эту цепь и так замыкает.
-      world-init:
+      # По той же причине. Слепки идут за событиями и замыкают цепь разовых
+      # служб; долгоживущие службы данных её не ждут, а `airflow-init` ждёт.
+      world-snapshots:
         condition: service_completed_successfully
     entrypoint: ["/bin/bash"]
     command: ["/opt/airflow/init.sh"]

@@ -4,7 +4,7 @@
 -- первый совпавший: скаляр проваливает и проверку на объект, и сверку ключей —
 -- без объявленного порядка он попал бы то в один класс, то в другой.
 
-INSERT INTO ods.order_snapshot_errors_dist
+INSERT INTO ods.order_errors_dist
 {% include "ods/_order_wire_contract.sql" %}
 SELECT
     raw,

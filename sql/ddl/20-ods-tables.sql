@@ -175,7 +175,7 @@ ENGINE = Distributed('clickstream_cluster', 'ods', 'event_errors_rep', cityHash6
 --
 -- items остаётся сырым фрагментом JSON: приём проверяет только, что это
 -- массив. Что внутри позиций — забота DDS, а не границы провода.
-CREATE TABLE IF NOT EXISTS ods.order_snapshot_rep ON CLUSTER clickstream_cluster
+CREATE TABLE IF NOT EXISTS ods.order_rep ON CLUSTER clickstream_cluster
 (
     order_id String,
     user_id UInt64,
@@ -199,9 +199,9 @@ ORDER BY order_id;
 -- и выбор здесь не про перекос, а про корректность: только так все версии
 -- одного заказа попадают на один шард, и FINAL через распределённую таблицу
 -- выбирает одного победителя, а не по победителю на шард.
-CREATE TABLE IF NOT EXISTS ods.order_snapshot_dist ON CLUSTER clickstream_cluster
-AS ods.order_snapshot_rep
-ENGINE = Distributed('clickstream_cluster', 'ods', 'order_snapshot_rep', cityHash64(order_id));
+CREATE TABLE IF NOT EXISTS ods.order_dist ON CLUSTER clickstream_cluster
+AS ods.order_rep
+ENGINE = Distributed('clickstream_cluster', 'ods', 'order_rep', cityHash64(order_id));
 
 -- Локальная таблица брака слепка.
 --
@@ -215,7 +215,7 @@ ENGINE = Distributed('clickstream_cluster', 'ods', 'order_snapshot_rep', cityHas
 -- field_invalid. Имя провалившегося поля в класс не входит — сырой текст лежит
 -- рядом, и единичный случай разбирается по нему, без постоянной детализации
 -- предиката (docs/architecture/orders/ingestion.md).
-CREATE TABLE IF NOT EXISTS ods.order_snapshot_errors_rep ON CLUSTER clickstream_cluster
+CREATE TABLE IF NOT EXISTS ods.order_errors_rep ON CLUSTER clickstream_cluster
 (
     raw String,
     error_class LowCardinality(String),
@@ -233,6 +233,6 @@ ORDER BY (error_class, kafka_partition, kafka_offset)
 TTL toDateTime(_load_ts) + INTERVAL 1 MONTH
 SETTINGS ttl_only_drop_parts = 1;
 
-CREATE TABLE IF NOT EXISTS ods.order_snapshot_errors_dist ON CLUSTER clickstream_cluster
-AS ods.order_snapshot_errors_rep
-ENGINE = Distributed('clickstream_cluster', 'ods', 'order_snapshot_errors_rep', cityHash64(raw));
+CREATE TABLE IF NOT EXISTS ods.order_errors_dist ON CLUSTER clickstream_cluster
+AS ods.order_errors_rep
+ENGINE = Distributed('clickstream_cluster', 'ods', 'order_errors_rep', cityHash64(raw));

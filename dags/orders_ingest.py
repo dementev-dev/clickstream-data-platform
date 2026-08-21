@@ -101,8 +101,8 @@ def orders_ingest():
         logging.info("срез разобран: _load_id %s", load_id)
 
     pull_batch("stg/orders_raw_load.sql") >> parse_batch(
-        "ods/order_snapshot_load.sql",
-        "ods/order_snapshot_errors_load.sql",
+        "ods/order_load.sql",
+        "ods/order_errors_load.sql",
     )
 
 
