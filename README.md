@@ -353,8 +353,9 @@ docker compose up --force-recreate --wait clickhouse-01 clickhouse-02
 Prometheus собирает встроенные метрики двух серверов и keeper, а через
 `kafka-exporter` — состояние Kafka. Поверх этого в Grafana поднимается дашборд
 «Данные»: свежесть, поток, брак, сходимость Kafka с ClickHouse, отставание
-чтения и дневной слепок заказов. Устройство зоны и разбор панелей — в
-[справочнике мониторинга](docs/architecture/monitoring.md); правил оповещения
+чтения и дневной слепок заказов. Устройство зоны — в [справочнике
+мониторинга](docs/architecture/monitoring/README.md), разбор панелей — в
+[описании дашборда](docs/architecture/monitoring/data.md); правил оповещения
 пока нет.
 
 Airflow закреплён на 3.3.0. Состав обязательных процессов, LocalExecutor,

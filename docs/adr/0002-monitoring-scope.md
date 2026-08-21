@@ -120,4 +120,4 @@ ClickHouse, Kafka и Airflow, 17 — в дашборде генератора, 1
 модельные сутки значит записать ускорение мира в JSON дашборда — ровно ту
 пометку, от которой этот же ADR отговаривает выше, — а реальные сутки на стенде
 не с чем сравнивать. Довод целиком и остальное устройство дашборда —
-[docs/architecture/monitoring.md](../architecture/monitoring.md).
+[docs/architecture/monitoring/data.md](../architecture/monitoring/data.md).
