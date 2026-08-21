@@ -1,0 +1,135 @@
+{
+  "uid": "queries",
+  "title": "Запросы",
+  "timezone": "utc",
+  "schemaVersion": 42,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Тяжёлые запросы: что прочитало больше всех",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    event_time AS \"Когда\",\n    hostName() AS \"Нода\",\n    if(empty(user), 'фоновая работа сервера', user) AS \"Кто\",\n    query_duration_ms AS \"Заняло, мс\",\n    memory_usage AS \"Память\",\n    read_rows AS \"Прочитано строк\",\n    result_rows AS \"Отдано строк\",\n    query AS \"Запрос\"\nFROM clusterAllReplicas('clickstream_cluster', system.query_log)\nWHERE $__timeFilter(event_time)\n    -- Начало запроса записано отдельной строкой, и в ней ещё нет ни времени,\n    -- ни памяти. Куски распределённого запроса отброшены: считает их тот, кто\n    -- запрос затеял.\n    AND type != 'QueryStart'\n    AND is_initial_query\nORDER BY \"Прочитано строк\" DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Память"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Кто спрашивает: сколько запросов и какой у них аппетит",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    if(empty(user), 'фоновая работа сервера', user) AS \"Кто\",\n    count() AS \"Запросов\",\n    sum(read_rows) AS \"Прочитано строк\",\n    max(memory_usage) AS \"Самый прожорливый, память\",\n    round(quantile(0.9)(query_duration_ms)) AS \"Девять из десяти быстрее, мс\"\nFROM clusterAllReplicas('clickstream_cluster', system.query_log)\nWHERE $__timeFilter(event_time)\n    AND type != 'QueryStart'\n    AND is_initial_query\nGROUP BY \"Кто\"\nORDER BY \"Прочитано строк\" DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Самый прожорливый, память"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Ошибки: на чём запросы споткнулись",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT\n    event_time AS \"Когда\",\n    hostName() AS \"Нода\",\n    if(empty(user), 'фоновая работа сервера', user) AS \"Кто\",\n    exception AS \"Чем кончилось\",\n    query AS \"Запрос\"\nFROM clusterAllReplicas('clickstream_cluster', system.query_log)\nWHERE $__timeFilter(event_time)\n    -- Здесь куски распределённого запроса нужны: отказ по памяти случается\n    -- на шарде, а не у того, кто спрашивал.\n    AND type IN ('ExceptionBeforeStart', 'ExceptionWhileProcessing')\nORDER BY \"Когда\" DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    }
+  ]
+}
