@@ -13,6 +13,7 @@ GENERATOR_SPEED ?=
 up:
 	$(COMPOSE) up --detach --build --wait --wait-timeout 600
 	COMPOSE_BIN="$(COMPOSE)" ./scripts/wait-for-world.sh
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/ingest-starting-orders.sh
 
 down:
 	$(COMPOSE) down --remove-orphans
