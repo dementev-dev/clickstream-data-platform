@@ -81,13 +81,13 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT\n    source AS \"Источник\",\n    countIf(NOT is_error) AS \"Приехало\",\n    countIf(is_error) AS \"В брак\",\n    100 * countIf(is_error) / countIf(NOT is_error) AS \"Доля брака, %\"\nFROM\n(\n    SELECT 'события' AS source, 0 AS is_error, _load_ts FROM stg.hits_raw_dist\n    UNION ALL\n    SELECT 'события', 1, _load_ts FROM ods.event_errors_dist\n    UNION ALL\n    SELECT 'заказы', 0, _load_ts FROM stg.orders_raw_dist\n    UNION ALL\n    SELECT 'заказы', 1, _load_ts FROM ods.order_errors_dist\n)\nWHERE $__timeFilter(_load_ts)\nGROUP BY source\nORDER BY source"
+          "rawSql": "SELECT\n    source AS \"Источник\",\n    countIf(NOT is_error) AS \"Приехало\",\n    countIf(is_error) AS \"Из них в брак\",\n    100 * countIf(is_error) / countIf(NOT is_error) AS \"Доля брака, %\"\nFROM\n(\n    SELECT 'события' AS source, 0 AS is_error, _load_ts FROM stg.hits_raw_dist\n    UNION ALL\n    SELECT 'события', 1, _load_ts FROM ods.event_errors_dist\n    UNION ALL\n    SELECT 'заказы', 0, _load_ts FROM stg.orders_raw_dist\n    UNION ALL\n    SELECT 'заказы', 1, _load_ts FROM ods.order_errors_dist\n)\nWHERE $__timeFilter(_load_ts)\nGROUP BY source\nORDER BY source"
         }
       ]
     },
     {
       "type": "table",
-      "title": "Дневной слепок заказов: какой доехал и когда",
+      "title": "Дневной слепок заказов: какой доехал, когда и после какой паузы",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -109,7 +109,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT\n    JSONExtractString(raw, 'snapshot_date') AS \"Слепок\",\n    max(_load_ts) AS \"Доехал\",\n    count() AS \"Строк\"\nFROM stg.orders_raw_dist\nGROUP BY \"Слепок\"\nORDER BY \"Слепок\" DESC\nLIMIT 10"
+          "rawSql": "SELECT\n    \"Слепок\",\n    \"Доехал\",\n    dateDiff('second', prev, \"Доехал\") AS \"После прошлого, с\",\n    \"Строк\"\nFROM\n(\n    SELECT\n        JSONExtractString(raw, 'snapshot_date') AS \"Слепок\",\n        max(_load_ts) AS \"Доехал\",\n        count() AS \"Строк\",\n        -- Обнуляемый тип нужен, чтобы у самого раннего слепка пауза осталась\n        -- пустой, а не превратилась в разницу с началом эпохи.\n        lagInFrame(toNullable(max(_load_ts))) OVER (ORDER BY \"Слепок\") AS prev\n    FROM stg.orders_raw_dist\n    GROUP BY \"Слепок\"\n)\nORDER BY \"Слепок\" DESC\nLIMIT 10"
         }
       ]
     },
@@ -195,7 +195,7 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "SELECT\n    -- Столбец подписан правым краем: ряд Kafka в этой точке — прирост офсета\n    -- за тот же интервал, а он набирается к его концу.\n    $__timeInterval(_load_ts) + INTERVAL $__interval_s SECOND AS t,\n    count() AS \"приземлилось в ClickHouse\"\nFROM stg.hits_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
+          "rawSql": "SELECT\n    -- Правый край, а не левый: ряд Kafka в этой точке — прирост за тот же\n    -- интервал, а он набирается к его концу.\n    $__timeInterval(_load_ts) + INTERVAL $__interval_s SECOND AS t,\n    count() AS \"приземлилось в ClickHouse\"\nFROM stg.hits_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
         }
       ],
       "interval": "1m"
