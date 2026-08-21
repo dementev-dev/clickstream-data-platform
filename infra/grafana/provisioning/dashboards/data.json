@@ -36,18 +36,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT dateDiff('second', max(_load_ts), now()) AS \"события\"\nFROM ods.event_dist"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT dateDiff('second', max(_load_ts), now()) AS \"заказы\"\nFROM ods.order_dist"
+          "rawSql": "SELECT\n    (SELECT dateDiff('second', max(_load_ts), now()) FROM ods.event_dist) AS \"события\",\n    (SELECT dateDiff('second', max(_load_ts), now()) FROM ods.order_dist) AS \"заказы\""
         }
       ],
       "fieldConfig": {
@@ -141,18 +130,7 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "SELECT\n    $__timeInterval(_load_ts) AS t,\n    count() AS \"события\"\nFROM stg.hits_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "timeseries",
-          "format": 0,
-          "rawSql": "SELECT\n    $__timeInterval(_load_ts) AS t,\n    count() AS \"заказы\"\nFROM stg.orders_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
+          "rawSql": "SELECT\n    $__timeInterval(_load_ts) AS t,\n    countIf(source = 'события') AS \"события\",\n    countIf(source = 'заказы') AS \"заказы\"\nFROM\n(\n    SELECT 'события' AS source, _load_ts FROM stg.hits_raw_dist\n    UNION ALL\n    SELECT 'заказы', _load_ts FROM stg.orders_raw_dist\n)\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
         }
       ]
     },
@@ -198,6 +176,23 @@
           "rawSql": "SELECT\n    -- Правый край, а не левый: ряд Kafka в этой точке — прирост за тот же\n    -- интервал, а он набирается к его концу.\n    $__timeInterval(_load_ts) + INTERVAL $__interval_s SECOND AS t,\n    count() AS \"приземлилось в ClickHouse\"\nFROM stg.hits_raw_dist\nWHERE $__timeFilter(_load_ts)\nGROUP BY t\nORDER BY t"
         }
       ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "приземлилось в ClickHouse"
+              }
+            ]
+          }
+        ]
+      },
       "interval": "1m"
     },
     {
