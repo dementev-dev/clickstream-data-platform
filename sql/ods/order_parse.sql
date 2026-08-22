@@ -92,7 +92,13 @@ SELECT
     _load_ts
 FROM stg.orders_raw_dist
 WHERE _load_id = {load_id:String} AND row_is_valid
-SETTINGS distributed_foreground_insert = 1;
+-- Заводская двойка parallel_distributed_insert_select исполняет вставку из
+-- Distributed в Distributed локально на каждом шарде, минуя ключ шардирования
+-- цели, — так заказы и расползлись по обоим шардам. Ноль отдаёт раскладку
+-- инициатору, по ключу цели. Капкан целиком — docs/architecture/storage.md,
+-- «Раскладка по шардам».
+SETTINGS distributed_foreground_insert = 1,
+    parallel_distributed_insert_select = 0;
 
 -- Брак: тот же срез и буквальное отрицание того же предиката.
 --
@@ -118,4 +124,7 @@ SELECT
     _load_ts
 FROM stg.orders_raw_dist
 WHERE _load_id = {load_id:String} AND NOT row_is_valid
-SETTINGS distributed_foreground_insert = 1;
+-- Тот же ноль: ключ брака сегодня совпадает с ключом сырья, и локальная
+-- запись легла бы верно — но по совпадению, а не по контракту.
+SETTINGS distributed_foreground_insert = 1,
+    parallel_distributed_insert_select = 0;
