@@ -92,7 +92,16 @@ SELECT
     _load_ts
 FROM stg.orders_raw_dist
 WHERE _load_id = {load_id:String} AND row_is_valid
-SETTINGS distributed_foreground_insert = 1;
+-- Заводское значение parallel_distributed_insert_select — 2: вставку вида
+-- INSERT ... SELECT из Distributed в Distributed на одном кластере ClickHouse
+-- исполняет локально на каждом шарде, и строки минуют ключ шардирования цели.
+-- Ключи здесь разные — сырьё разложено по хешу строки, заказы по
+-- cityHash64(order_id), — так версии одного заказа и расползлись по обоим
+-- шардам, где ReplacingMergeTree их уже не схлопывает. Ноль возвращает вставку
+-- инициатору: он читает срез со всех шардов и пишет через ods.order_dist,
+-- то есть по её ключу.
+SETTINGS distributed_foreground_insert = 1,
+    parallel_distributed_insert_select = 0;
 
 -- Брак: тот же срез и буквальное отрицание того же предиката.
 --
@@ -118,4 +127,9 @@ SELECT
     _load_ts
 FROM stg.orders_raw_dist
 WHERE _load_id = {load_id:String} AND NOT row_is_valid
-SETTINGS distributed_foreground_insert = 1;
+-- Тот же ноль, хотя здесь заводское значение раскладку не ломало: ключ у
+-- ods.order_errors_dist — cityHash64(raw), тот же, что у сырья, и локальная
+-- запись попадала бы в свой шард сама. Совпадение ключей не гарантия:
+-- поменяется ключ любой из двух таблиц — и строки разъедутся молча.
+SETTINGS distributed_foreground_insert = 1,
+    parallel_distributed_insert_select = 0;
