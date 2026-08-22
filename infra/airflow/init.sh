@@ -22,21 +22,26 @@ PY
 
 runuser -u airflow -- airflow db migrate
 runuser -u airflow -- airflow connections delete clickhouse_default >/dev/null 2>&1 || true
+# Прикладные запросы короткие: 30 с отличают зависший транспорт от работы запроса.
 runuser -u airflow -- airflow connections add clickhouse_default \
-    --conn-type generic \
+    --conn-type clickhouse \
     --conn-host clickhouse-01 \
     --conn-port 8123 \
     --conn-login etl \
     --conn-password "$CLICKHOUSE_ETL_PASSWORD" \
     --conn-schema default \
-    --conn-description "ClickHouse, нода 1; типизированный провайдер появится на этапе ETL"
+    --conn-extra '{"connect_timeout": 5, "send_receive_timeout": 30}' \
+    --conn-description "ClickHouse, нода 1; запросы прикладных дагов"
 
 runuser -u airflow -- airflow connections delete clickhouse_lifecycle >/dev/null 2>&1 || true
+# `ON CLUSTER` ждёт хосты до 180 с. Транспорт живёт дольше, чтобы ClickHouse
+# успел назвать незавершённый хост вместо сетевого тайм-аута.
 runuser -u airflow -- airflow connections add clickhouse_lifecycle \
-    --conn-type generic \
+    --conn-type clickhouse \
     --conn-host clickhouse-01 \
     --conn-port 8123 \
     --conn-login lifecycle \
     --conn-password "$CLICKHOUSE_LIFECYCLE_PASSWORD" \
     --conn-schema default \
+    --conn-extra '{"connect_timeout": 5, "send_receive_timeout": 300}' \
     --conn-description "ClickHouse, нода 1; создание и пересоздание прикладного мира"
