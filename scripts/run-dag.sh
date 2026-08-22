@@ -8,6 +8,7 @@ readonly DAG_ID="${1:-}"
 readonly ATTEMPTS=400
 readonly PAUSE_SECONDS=3
 readonly REPORT_EVERY=5
+readonly TRIGGER_ATTEMPTS=20
 
 read -r -a COMPOSE_CMD <<<"${COMPOSE_BIN:-docker compose}"
 
@@ -68,14 +69,43 @@ jq -e --arg dag_id "$DAG_ID" '.dag_id == $dag_id' \
     >/dev/null 2>&1 <<<"$dag" || \
     fail "даг ${DAG_ID} не появился за $((ATTEMPTS * PAUSE_SECONDS)) с; $(next_step)"
 
-if ! response="$(curl -sS --fail-with-body --max-time 10 -X POST \
-    -H "Authorization: Bearer ${token}" \
-    -H 'Content-Type: application/json' \
-    -d '{"logical_date":null}' \
-    "http://127.0.0.1:${port}/api/v2/dags/${DAG_ID}/dagRuns" 2>/dev/null)"; then
+# GET читает DagModel по идентификатору, а POST запуска принимает только запись
+# с `is_stale = false`. На холодном старте GET уже может видеть даг, пока POST
+# ещё отвечает этим 404. Повторяем только его: после сетевой ошибки запрос мог
+# успеть создать запуск, и повтор с автоматическим run_id создал бы второй.
+expected_missing_detail="Dag with dag_id: '${DAG_ID}' not found"
+triggered=0
+for ((attempt = 1; attempt <= TRIGGER_ATTEMPTS; attempt++)); do
+    if ! response_with_status="$(curl -sS --max-time 10 -w $'\n%{http_code}' -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -H 'Content-Type: application/json' \
+        -d '{"logical_date":null}' \
+        "http://127.0.0.1:${port}/api/v2/dags/${DAG_ID}/dagRuns" 2>/dev/null)"; then
+        fail "Airflow не ответил при запуске дага ${DAG_ID}; проверьте список запусков перед повтором команды"
+    fi
+    http_status="${response_with_status##*$'\n'}"
+    response="${response_with_status%$'\n'*}"
     detail="$(jq -r '.detail // .message // empty' <<<"$response" 2>/dev/null || true)"
-    fail "Airflow не запустил даг ${DAG_ID}${detail:+: ${detail}}; $(next_step)"
-fi
+    case "$http_status" in
+        2??)
+            triggered=1
+            break
+            ;;
+        404)
+            if [[ "$detail" == "$expected_missing_detail" ]]; then
+                if ((attempt == 1 || attempt % REPORT_EVERY == 0)); then
+                    printf 'Airflow: даг %s ещё не готов к запуску; ждём (%d с).\n' \
+                        "$DAG_ID" "$((attempt * PAUSE_SECONDS))"
+                fi
+                ((attempt < TRIGGER_ATTEMPTS)) && sleep "$PAUSE_SECONDS"
+                continue
+            fi
+            ;;
+    esac
+    fail "Airflow не запустил даг ${DAG_ID}: HTTP ${http_status}${detail:+: ${detail}}; $(next_step)"
+done
+((triggered == 1)) || \
+    fail "даг ${DAG_ID} не стал доступен для запуска за $((TRIGGER_ATTEMPTS * PAUSE_SECONDS)) с; $(next_step)"
 run_id="$(jq -r '.dag_run_id // empty' <<<"$response")"
 state="$(jq -r '.state // "queued"' <<<"$response")"
 [[ -n "$run_id" ]] || fail "Airflow не вернул идентификатор запуска ${DAG_ID}"

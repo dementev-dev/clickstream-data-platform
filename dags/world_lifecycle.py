@@ -18,10 +18,12 @@ import time
 from pathlib import Path
 
 from airflow.exceptions import AirflowException
+from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.docker.hooks.docker import DockerHook
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.sdk import Connection, Variable, dag, task
+from airflow.sdk import Variable, chain, dag, task
 
 START_DATE = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 TAGS = ["жизненный цикл мира"]
@@ -34,7 +36,8 @@ KAFKA_BOOTSTRAP_SERVERS = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 GENERATOR_IMAGE = os.environ["GENERATOR_IMAGE"]
 STAND_NETWORK = os.environ["STAND_NETWORK"]
 
-SQL_ROOT = Path("/opt/airflow/sql/ddl")
+SQL_ROOT = Path("/opt/airflow/sql")
+DDL_ROOT = SQL_ROOT / "ddl"
 WORLD_ROOT = Path("/opt/airflow/world")
 INVENTORY = WORLD_ROOT / "data/world-inventory.json"
 CLICKHOUSE_CONNECTION = "clickhouse_lifecycle"
@@ -44,48 +47,9 @@ CONSUMER_GROUPS = ("clickstream_hits", "clickstream_orders")
 TOPICS = {HITS_TOPIC: 2, ORDERS_TOPIC: 1}
 
 
-def _clickhouse_client():
-    """Открыть соединение владельца жизненного цикла."""
-    import clickhouse_connect
-
-    connection = Connection.get(CLICKHOUSE_CONNECTION)
-    return clickhouse_connect.get_client(
-        host=connection.host,
-        port=connection.port,
-        username=connection.login,
-        password=connection.password,
-        database=connection.schema or "default",
-        connect_timeout=5,
-        # `ON CLUSTER` ждёт хосты до 180 с. Транспорт живёт дольше, чтобы
-        # ClickHouse сам назвал незавершённый хост вместо сетевого тайм-аута.
-        send_receive_timeout=300,
-    )
-
-
-def _ddl_statements(text: str) -> list[str]:
-    """Разделить канонический DDL по его явному правилу файлов.
-
-    ClickHouse Connect исполняет один запрос за вызов. В `sql/ddl` конец
-    выражения — точка с запятой в конце строки; это проверяемая конвенция
-    наших файлов, а не попытка написать общий SQL-парсер.
-    """
-    statements: list[str] = []
-    lines: list[str] = []
-    for line in text.splitlines():
-        lines.append(line)
-        stripped = line.rstrip()
-        if stripped.endswith(";") and not stripped.lstrip().startswith("--"):
-            statement = "\n".join(lines).strip()
-            statements.append(statement[:-1].rstrip())
-            lines = []
-
-    remainder = "\n".join(lines).strip()
-    if remainder and any(
-        line.strip() and not line.lstrip().startswith("--")
-        for line in remainder.splitlines()
-    ):
-        raise AirflowException("DDL-файл оканчивается незавершённым выражением")
-    return statements
+def _clickhouse_hook() -> ClickHouseHook:
+    """Подключить владельца жизненного цикла."""
+    return ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONNECTION)
 
 
 def _generator(task_id: str, command: list[str]) -> DockerOperator:
@@ -118,6 +82,7 @@ def _kafka_error_code(error: Exception) -> int:
     start_date=START_DATE,
     is_paused_upon_creation=False,
     max_active_runs=1,
+    template_searchpath=str(SQL_ROOT),
     tags=TAGS,
 )
 def world_initialize():
@@ -195,23 +160,6 @@ def world_initialize():
                 )
 
     @task
-    def apply_ddl() -> None:
-        """Применить канонические файлы DDL с ноды 1 по порядку имён."""
-        files = sorted(SQL_ROOT.glob("*.sql"))
-        if not files:
-            raise AirflowException(f"в {SQL_ROOT} нет файлов DDL")
-
-        client = _clickhouse_client()
-        try:
-            for path in files:
-                statements = _ddl_statements(path.read_text(encoding="utf-8"))
-                logging.info("применяем %s: выражений %s", path.name, len(statements))
-                for statement in statements:
-                    client.command(statement)
-        finally:
-            client.close()
-
-    @task
     def build_generator_image() -> None:
         """Собрать генератор из текущего дерева, а не из старого образа."""
         client = DockerHook(
@@ -248,22 +196,19 @@ def world_initialize():
               + (SELECT count() FROM ods.event_errors_dist)
         """
 
-        client = _clickhouse_client()
-        try:
-            arrived = 0
-            for attempt in range(1, 101):
-                row = client.query(query).first_row
-                if row is None:
-                    raise AirflowException("ClickHouse не вернул счётчик приёма")
-                arrived = int(row[0])
-                if arrived >= expected:
-                    logging.info("стартовый мир принят: строк %s", arrived)
-                    return
-                if attempt % 5 == 0:
-                    logging.info("принято %s из %s строк", arrived, expected)
-                time.sleep(3)
-        finally:
-            client.close()
+        hook = _clickhouse_hook()
+        arrived = 0
+        for attempt in range(1, 101):
+            row = hook.get_first(query)
+            if row is None:
+                raise AirflowException("ClickHouse не вернул счётчик приёма")
+            arrived = int(row[0])
+            if arrived >= expected:
+                logging.info("стартовый мир принят: строк %s", arrived)
+                return
+            if attempt % 5 == 0:
+                logging.info("принято %s из %s строк", arrived, expected)
+            time.sleep(3)
         raise AirflowException(
             f"стартовый мир не принят за 300 с: строк {arrived} из {expected}; "
             "проверьте журнал send_initial_events и "
@@ -279,7 +224,19 @@ def world_initialize():
     route = choose_path()
     ready = world_already_exists()
     topics = create_topics()
-    ddl = apply_ddl()
+    ddl_files = sorted(DDL_ROOT.glob("*.sql"))
+    if not ddl_files:
+        raise AirflowException(f"в {DDL_ROOT} нет файлов DDL")
+    ddl_tasks = [
+        SQLExecuteQueryOperator(
+            task_id=f"apply_{path.stem.replace('-', '_')}",
+            conn_id=CLICKHOUSE_CONNECTION,
+            sql=f"ddl/{path.name}",
+            split_statements=True,
+            do_xcom_push=False,
+        )
+        for path in ddl_files
+    ]
     image = build_generator_image()
     events = _generator(
         "send_initial_events",
@@ -307,7 +264,7 @@ def world_initialize():
     position = remember_starting_position()
 
     route >> [ready, topics]
-    topics >> ddl >> image >> events >> arrived >> snapshots >> orders >> position
+    chain(topics, *ddl_tasks, image, events, arrived, snapshots, orders, position)
 
 
 @dag(
@@ -328,16 +285,13 @@ def world_recreate():
 
     @task
     def drop_application_databases() -> None:
-        client = _clickhouse_client()
-        try:
-            for database in APPLICATION_DATABASES:
-                logging.info("удаляем базу %s", database)
-                client.command(
-                    f"DROP DATABASE IF EXISTS {database} "
-                    f"ON CLUSTER {CLICKHOUSE_CLUSTER} SYNC"
-                )
-        finally:
-            client.close()
+        hook = _clickhouse_hook()
+        for database in APPLICATION_DATABASES:
+            logging.info("удаляем базу %s", database)
+            hook.run(
+                f"DROP DATABASE IF EXISTS {database} "
+                f"ON CLUSTER {CLICKHOUSE_CLUSTER} SYNC"
+            )
 
     @task
     def delete_consumer_groups() -> None:

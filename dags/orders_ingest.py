@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 import datetime
-import logging
 
-from airflow.sdk import Connection, dag, get_current_context, task
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+from airflow.sdk import dag
 
 START_DATE = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
@@ -43,67 +43,25 @@ SQL_ROOT = "/opt/airflow/sql"
 )
 def orders_ingest():
     """Забрать приехавший слепок заказов и разложить его по слоям."""
-
-    def clickhouse_client():
-        # Импорт при выполнении задачи, а не при разборе файла: обработчик DAG
-        # разбирает его снова и снова, и импорт наверху оплачивался бы каждым
-        # разбором.
-        import clickhouse_connect
-
-        connection = Connection.get("clickhouse_default")
-        return clickhouse_connect.get_client(
-            host=connection.host,
-            port=connection.port,
-            username=connection.login,
-            password=connection.password,
-            database=connection.schema or "default",
-            connect_timeout=5,
-            send_receive_timeout=30,
-        )
-
-    # Аргумент с расширением из templates_exts Airflow подменяет текстом файла:
-    # берёт его из template_searchpath и прогоняет через Jinja при исполнении
-    # задачи, а не при разборе дага. В задачу приезжает готовый запрос — вместе
-    # с тем, что файл подключил через include.
-    @task(templates_exts=(".sql",))
-    def pull_batch(sql: str) -> None:
-        load_id = get_current_context()["run_id"]
-        client = clickhouse_client()
-        try:
-            summary = client.command(sql, parameters={"load_id": load_id})
-        finally:
-            client.close()
-        # Размер порции — read_rows: written_rows у вставки в Distributed
-        # считает не приехавшее.
-        logging.info(
-            "порция принята: строк %s, _load_id %s",
-            summary.summary["read_rows"],
-            load_id,
-        )
-
-    @task(templates_exts=(".sql",))
-    def parse_batch(good_rows_sql: str, bad_rows_sql: str) -> None:
-        """Разобрать срез сырья в версии заказов и в брак.
-
-        Обе вставки в одном task_id: транзакции между ними ClickHouse не даёт,
-        а повтор задачи безопасен — срез читается по тому же неизменному
-        _load_id (docs/architecture/orders/ingestion.md, «Поток данных»).
-        """
-        load_id = get_current_context()["run_id"]
-        client = clickhouse_client()
-        try:
-            client.command(good_rows_sql, parameters={"load_id": load_id})
-            client.command(bad_rows_sql, parameters={"load_id": load_id})
-        finally:
-            client.close()
-        # Счётчиков строк нет: у запроса с WHERE read_rows считает прочитанное
-        # с диска, а не подошедшее (storage.md, «Что проверено»).
-        logging.info("срез разобран: _load_id %s", load_id)
-
-    pull_batch("stg/orders_raw_load.sql") >> parse_batch(
-        "ods/order_load.sql",
-        "ods/order_errors_load.sql",
+    pull_batch = SQLExecuteQueryOperator(
+        task_id="pull_batch",
+        conn_id="clickhouse_default",
+        sql="stg/orders_raw_load.sql",
+        parameters={"load_id": "{{ run_id }}"},
+        do_xcom_push=False,
     )
+    parse_batch = SQLExecuteQueryOperator(
+        task_id="parse_batch",
+        conn_id="clickhouse_default",
+        sql="ods/order_parse.sql",
+        parameters={"load_id": "{{ run_id }}"},
+        split_statements=True,
+        do_xcom_push=False,
+    )
+
+    # ClickHouse не даёт транзакции между двумя вставками parse_batch. Один
+    # task_id сохраняет их порядок и одну точку повтора для неизменного load_id.
+    pull_batch >> parse_batch
 
 
 orders_ingest()

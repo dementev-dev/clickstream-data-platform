@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import uuid
 
+from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.sdk import Connection, dag, get_current_context, task
 
 CLUSTER = "clickstream_cluster"
@@ -54,27 +55,12 @@ def _remote_parameters() -> dict[str, str]:
     }
 
 
-def _clickhouse_client():
-    # clickhouse_connect импортируется внутри функции, а не наверху файла:
-    # обработчик DAG разбирает этот файл снова и снова, и импорт наверху
-    # оплачивался бы каждым разбором. Тяжёлые импорты Airflow советует
-    # держать внутри задач.
-    import clickhouse_connect
-
-    connection = Connection.get("clickhouse_default")
-    return clickhouse_connect.get_client(
-        host=connection.host,
-        port=connection.port,
-        username=connection.login,
-        password=connection.password,
-        database=connection.schema or "default",
-        connect_timeout=5,
-        send_receive_timeout=30,
-    )
+def _clickhouse_hook() -> ClickHouseHook:
+    return ClickHouseHook(clickhouse_conn_id="clickhouse_default")
 
 
-def _table_engines(client, source: str) -> list[tuple[str, str]]:
-    result = client.query(
+def _table_engines(hook: ClickHouseHook, source: str) -> list[tuple[str, str]]:
+    return hook.get_records(
         f"""
         SELECT name, engine
         FROM {source}
@@ -84,23 +70,23 @@ def _table_engines(client, source: str) -> list[tuple[str, str]]:
         """,
         parameters=_remote_parameters(),
     )
-    return result.result_rows
 
 
-def _drop_tables(client) -> None:
-    client.command(
-        f"DROP TABLE IF EXISTS default.{DISTRIBUTED_TABLE} ON CLUSTER {CLUSTER} SYNC"
-    )
-    client.command(
-        f"DROP TABLE IF EXISTS default.{LOCAL_TABLE} ON CLUSTER {CLUSTER} SYNC"
+def _drop_tables(hook: ClickHouseHook) -> None:
+    hook.run(
+        [
+            f"DROP TABLE IF EXISTS default.{DISTRIBUTED_TABLE} "
+            f"ON CLUSTER {CLUSTER} SYNC",
+            f"DROP TABLE IF EXISTS default.{LOCAL_TABLE} ON CLUSTER {CLUSTER} SYNC",
+        ],
     )
 
 
 # Отсутствие таблиц проверяют обе задачи — перед созданием и после уборки,
 # — поэтому у этой проверки своё имя, а остальные живут прямо в теле задач.
-def _assert_tables_absent(client) -> None:
+def _assert_tables_absent(hook: ClickHouseHook) -> None:
     for node_name, source in NODES:
-        remaining = _table_engines(client, source)
+        remaining = _table_engines(hook, source)
         if remaining:
             raise RuntimeError(
                 f"служебные таблицы остались на {node_name}: {remaining}"
@@ -118,11 +104,11 @@ def _assert_tables_absent(client) -> None:
 def test_clickhouse():
     @task
     def prepare_tables() -> None:
-        client = _clickhouse_client()
-        try:
-            _drop_tables(client)
-            _assert_tables_absent(client)
-            client.command(
+        hook = _clickhouse_hook()
+        _drop_tables(hook)
+        _assert_tables_absent(hook)
+        hook.run(
+            [
                 f"""
                 CREATE TABLE default.{LOCAL_TABLE} ON CLUSTER {CLUSTER}
                 (
@@ -133,9 +119,7 @@ def test_clickhouse():
                     '{{replica}}'
                 )
                 ORDER BY marker
-                """
-            )
-            client.command(
+                """,
                 f"""
                 CREATE TABLE default.{DISTRIBUTED_TABLE} ON CLUSTER {CLUSTER}
                 AS default.{LOCAL_TABLE}
@@ -145,86 +129,77 @@ def test_clickhouse():
                     '{LOCAL_TABLE}',
                     cityHash64(marker)
                 )
-                """
-            )
-            for node_name, source in NODES:
-                actual_tables = _table_engines(client, source)
-                if actual_tables != EXPECTED_TABLES:
-                    raise RuntimeError(
-                        f"неверный набор таблиц на {node_name}: {actual_tables}"
-                    )
-        finally:
-            client.close()
+                """,
+            ],
+        )
+        for node_name, source in NODES:
+            actual_tables = _table_engines(hook, source)
+            if actual_tables != EXPECTED_TABLES:
+                raise RuntimeError(
+                    f"неверный набор таблиц на {node_name}: {actual_tables}"
+                )
 
     @task
     def write_marker() -> dict[str, str]:
-        client = _clickhouse_client()
-        try:
-            marker = f"{get_current_context()['run_id']}:{uuid.uuid4()}"
-            client.insert(
-                f"default.{LOCAL_TABLE}",
-                [[marker]],
-                column_names=["marker"],
-            )
-            local_rows = client.query(
-                f"""
-                SELECT hostName(), marker
-                FROM default.{LOCAL_TABLE}
-                WHERE marker = {{marker:String}}
-                """,
-                parameters={"marker": marker},
-            ).result_rows
-            if len(local_rows) != 1 or local_rows[0][1] != marker:
-                raise RuntimeError(f"маркер не найден в локальной таблице: {marker}")
-            return {"marker": marker, "hostname": local_rows[0][0]}
-        finally:
-            client.close()
+        hook = _clickhouse_hook()
+        marker = f"{get_current_context()['run_id']}:{uuid.uuid4()}"
+        hook.bulk_insert_rows(
+            f"default.{LOCAL_TABLE}",
+            [[marker]],
+            column_names=["marker"],
+        )
+        local_rows = hook.get_records(
+            f"""
+            SELECT hostName(), marker
+            FROM default.{LOCAL_TABLE}
+            WHERE marker = {{marker:String}}
+            """,
+            parameters={"marker": marker},
+        )
+        if len(local_rows) != 1 or local_rows[0][1] != marker:
+            raise RuntimeError(f"маркер не найден в локальной таблице: {marker}")
+        return {"marker": marker, "hostname": local_rows[0][0]}
 
     @task
     def read_from_node_2(written: dict[str, str]) -> None:
-        client = _clickhouse_client()
-        try:
-            node_2_rows = client.query(
-                """
-                SELECT hostName()
-                FROM remote(
-                    'clickhouse-02:9000', 'system', 'one',
-                    {remote_user:String}, {remote_password:String}
-                )
-                """,
-                parameters=_remote_parameters(),
-            ).result_rows
-            if len(node_2_rows) != 1:
-                raise RuntimeError(f"не удалось определить имя ноды 2: {node_2_rows}")
-            distributed_rows = client.query(
-                f"""
-                SELECT _shard_num, hostName(), marker
-                FROM remote(
-                    'clickhouse-02:9000',
-                    'default',
-                    '{DISTRIBUTED_TABLE}',
-                    {{remote_user:String}},
-                    {{remote_password:String}}
-                )
-                WHERE marker = {{marker:String}}
-                """,
-                parameters={
-                    "marker": written["marker"],
-                    **_remote_parameters(),
-                },
-            ).result_rows
-            if written["hostname"] == node_2_rows[0][0]:
-                raise RuntimeError(
-                    "запись и чтение маркера должны выполняться с разных нод"
-                )
-            expected_rows = [(1, written["hostname"], written["marker"])]
-            if distributed_rows != expected_rows:
-                raise RuntimeError(
-                    "нода 2 не прочитала маркер первого шарда через Distributed: "
-                    f"{written['marker']}, получено {distributed_rows}"
-                )
-        finally:
-            client.close()
+        hook = _clickhouse_hook()
+        node_2_rows = hook.get_records(
+            """
+            SELECT hostName()
+            FROM remote(
+                'clickhouse-02:9000', 'system', 'one',
+                {remote_user:String}, {remote_password:String}
+            )
+            """,
+            parameters=_remote_parameters(),
+        )
+        if len(node_2_rows) != 1:
+            raise RuntimeError(f"не удалось определить имя ноды 2: {node_2_rows}")
+        distributed_rows = hook.get_records(
+            f"""
+            SELECT _shard_num, hostName(), marker
+            FROM remote(
+                'clickhouse-02:9000',
+                'default',
+                '{DISTRIBUTED_TABLE}',
+                {{remote_user:String}},
+                {{remote_password:String}}
+            )
+            WHERE marker = {{marker:String}}
+            """,
+            parameters={
+                "marker": written["marker"],
+                **_remote_parameters(),
+            },
+        )
+        if written["hostname"] == node_2_rows[0][0]:
+            raise RuntimeError("запись и чтение маркера должны идти с разных нод")
+        expected_rows = [(1, written["hostname"], written["marker"])]
+        if distributed_rows != expected_rows:
+            raise RuntimeError(
+                "нода 2 не прочитала маркер первого шарда через Distributed: "
+                f"{written['marker']}, получено {distributed_rows}"
+            )
 
     # Уборка идёт только после успеха: упавший пробник оставляет кластер таким,
     # каким сломался, а остатки сносит начало следующего запуска. Правило
@@ -233,12 +208,9 @@ def test_clickhouse():
     # с упавшей проверкой (ADR 0003).
     @task
     def cleanup_tables() -> None:
-        client = _clickhouse_client()
-        try:
-            _drop_tables(client)
-            _assert_tables_absent(client)
-        finally:
-            client.close()
+        hook = _clickhouse_hook()
+        _drop_tables(hook)
+        _assert_tables_absent(hook)
 
     prepared = prepare_tables()
     written = write_marker()

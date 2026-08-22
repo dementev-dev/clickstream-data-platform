@@ -374,10 +374,12 @@ Airflow закреплён на 3.3.0. Состав обязательных п�
 [архитектурой Airflow 3.3](https://airflow.apache.org/docs/apache-airflow/3.3.0/core-concepts/overview.html),
 [публичным интерфейсом](https://airflow.apache.org/docs/apache-airflow/3.3.0/public-airflow-interface.html)
 и [описанием здоровья](https://airflow.apache.org/docs/apache-airflow/3.3.0/administration-and-deployment/logging-monitoring/check-health.html).
-Для пробников проверены публичный `Connection.get` из `airflow.sdk` и клиент
+Для ClickHouse установлен официальный провайдер Airflow: SQL-файлы исполняет
+общий `SQLExecuteQueryOperator`, программные запросы идут через
+`ClickHouseHook`. Провайдер работает поверх закреплённого
 `clickhouse-connect`. Официальный провайдер Kafka сам использует
-`confluent-kafka`; отдельное подключение и обёртки провайдера здесь не нужны,
-поэтому прямой клиент оставляет образ и пример короче.
+`confluent-kafka`; отдельное подключение и его обёртки здесь не нужны, поэтому
+клиент Kafka добавлен в образ напрямую.
 Superset закреплён на 6.1.0; драйвер `clickhouse-connect`, форма
 `clickhousedb://` и драйвер Postgres сверены с
 [документацией подключений Superset](https://superset.apache.org/user-docs/6.1.0/databases/)

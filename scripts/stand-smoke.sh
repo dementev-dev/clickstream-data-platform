@@ -204,6 +204,7 @@ check_airflow() {
     local dag
     local dag_id
     local health
+    local lifecycle_connection
     local password
     local response
     local user
@@ -253,21 +254,33 @@ check_airflow() {
         -H "Authorization: Bearer ${airflow_token}" \
         "http://127.0.0.1:${airflow_port}/api/v2/connections/clickhouse_default" \
         2>/dev/null || true)"
+    lifecycle_connection="$(curl -sf --max-time 10 \
+        -H "Authorization: Bearer ${airflow_token}" \
+        "http://127.0.0.1:${airflow_port}/api/v2/connections/clickhouse_lifecycle" \
+        2>/dev/null || true)"
     if jq -e '
         .connection_id == "clickhouse_default" and
+        .conn_type == "clickhouse" and
         .host == "clickhouse-01" and
         .port == 8123 and
         .login == "etl" and
         .schema == "default"
-    ' >/dev/null 2>&1 <<<"$connection" && \
+    ' >/dev/null 2>&1 <<<"$connection" && jq -e '
+        .connection_id == "clickhouse_lifecycle" and
+        .conn_type == "clickhouse" and
+        .host == "clickhouse-01" and
+        .port == 8123 and
+        .login == "lifecycle" and
+        .schema == "default"
+    ' >/dev/null 2>&1 <<<"$lifecycle_connection" && \
         timeout 20s "${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" \
             exec -T airflow-scheduler \
             curl -sf -u "etl:${clickhouse_password}" \
             'http://clickhouse-01:8123/?query=SELECT%201' \
             2>/dev/null | grep -qx '1'; then
-        pass 'подготовленное подключение Airflow указывает на clickhouse-01, нода доступна из контейнера'
+        pass 'оба подключения Airflow имеют тип clickhouse, нода 1 доступна из контейнера'
     else
-        fail 'подключение Airflow не указывает на clickhouse-01 или нода недоступна из контейнера'
+        fail 'тип или адрес подключений Airflow отличается от ожидаемого либо нода 1 недоступна из контейнера'
     fi
 }
 
