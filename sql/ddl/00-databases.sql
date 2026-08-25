@@ -14,8 +14,7 @@ CREATE DATABASE IF NOT EXISTS stg ON CLUSTER clickstream_cluster;
 -- порядок файлов от этого не зависит.
 CREATE DATABASE IF NOT EXISTS ods ON CLUSTER clickstream_cluster;
 
--- Объекты DDS появятся на следующем этапе; база заводится заранее по той же
--- причине, что и ODS.
+-- База DDS заводится здесь же по той же причине, что и ODS.
 CREATE DATABASE IF NOT EXISTS dds ON CLUSTER clickstream_cluster;
 
 -- Справочники стоят вне цепочки STG → ODS → DDS → DM: в хранилище их никто не
