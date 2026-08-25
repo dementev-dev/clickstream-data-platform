@@ -44,6 +44,7 @@
         <!-- Оба читателя: clickhouse-connect читает system.settings при подключении. -->
         <bi_reader>
             <grants>
+                <query>GRANT SELECT ON ods.*</query>
                 <query>GRANT SELECT ON dds.*</query>
                 <query>GRANT SELECT ON dm.*</query>
                 <query>GRANT SELECT, dictGet ON dic.*</query>
