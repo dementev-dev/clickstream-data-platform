@@ -1,10 +1,10 @@
 """Опись мира: чем стенд наполняется при подъёме и каким это обязано выйти.
 
 Мир — чистая функция зерна (спека генератора, раздел 2), поэтому в git лежит не
-он сам, а опись: паспорт мира, число событий по дням и хеш байтов каждого дня.
-Сам мир пересчитывается когда угодно, а опись отвечает на единственный вопрос —
-**тот ли это мир, что был вчера**. Разошлись хеши — мир уехал, и дальше уже
-неважно, чего от него ждали проверки.
+он сам, а опись: паспорт мира, число событий и хеш байтов каждого дня, счётчики
+классов расхождений по заказам. Сам мир пересчитывается когда угодно, а опись
+отвечает на единственный вопрос — **тот ли это мир, что был вчера**. Разошлись
+хеши — мир уехал, и дальше уже неважно, чего от него ждали проверки.
 
 Дней в описи восемь: столько заливается в стенд при `make up`. Понедельник по
 понедельник — полная неделя с выходными и первый замкнутый цикл окна K = 7.
@@ -43,9 +43,9 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+from clickstream_generator import commerce, serialize, world
 from clickstream_generator import day as day_module
 from clickstream_generator import orders as orders_module
-from clickstream_generator import serialize, world
 from clickstream_generator.catalog import CATALOG_PATH
 from clickstream_generator.seeds import CANONICAL_SEED
 
@@ -66,7 +66,10 @@ def build() -> dict[str, Any]:
     orders = []
     for number in range(STARTING_DAYS):
         today = day_module.stream(CANONICAL_SEED, number)
-        days.append(_day(number, today))
+        row = _day(number, today)
+        if number < STARTING_DAYS - world.ORDER_WINDOW_DAYS:
+            row["orders"] = _order_class_counts(today)
+        days.append(row)
         orders.append(today.orders)
 
     return {
@@ -113,6 +116,25 @@ def _snapshot(number: int, orders: list[orders_module.Orders]) -> dict[str, Any]
         "date": _date(number),
         "sha256": _digest(b"".join(payload + b"\n" for payload in payloads)),
     }
+
+
+def _order_class_counts(today: day_module.Day) -> dict[str, int]:
+    """Заказы дня по итоговому классу: отмена перевешивает дельту суммы."""
+    purchase = today.columns["EventType"] == commerce.PURCHASE
+    declared = today.columns["purchaseRevenue"][purchase]
+    counts = {"match": 0, "cancelled": 0, "amount_delta": 0}
+
+    for outcome, items_total, revenue in zip(
+        today.orders.outcome, today.orders.items_total, declared, strict=True
+    ):
+        if outcome != orders_module.OrderOutcome.PAID:
+            counts["cancelled"] += 1
+        elif items_total != round(revenue[0] * commerce.KOPECKS):
+            counts["amount_delta"] += 1
+        else:
+            counts["match"] += 1
+
+    return counts
 
 
 def _date(number: int) -> str:

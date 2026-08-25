@@ -7,7 +7,12 @@
       "day": 0,
       "date": "2026-06-01",
       "events": 50626,
-      "sha256": "81ad7f402bdd4c8b56425f6439a024b9996e5ca95dd207d444290d20a70ed407"
+      "sha256": "81ad7f402bdd4c8b56425f6439a024b9996e5ca95dd207d444290d20a70ed407",
+      "orders": {
+        "match": 197,
+        "cancelled": 20,
+        "amount_delta": 6
+      }
     },
     {
       "day": 1,

@@ -17,7 +17,9 @@ from pathlib import Path
 import pytest
 
 from clickstream_generator import cli
+from clickstream_generator import day as day_module
 from clickstream_generator.inventory import STARTING_DAYS, build
+from clickstream_generator.seeds import CANONICAL_SEED
 
 INVENTORY_PATH = Path(__file__).resolve().parents[2] / "data" / "world-inventory.json"
 
@@ -39,6 +41,16 @@ def test_inventory_is_up_to_date(inventory: dict):
         " Разошлись хеши дней и каталога — правили data/catalog/products.csv;"
         " разошлись только дни — правили генератор"
     )
+
+
+def test_order_class_counters_cover_only_closed_days(inventory: dict):
+    """Итог заказа становится опорой только после закрытия его окна."""
+    rows = [row for row in inventory["days"] if "orders" in row]
+
+    assert [row["day"] for row in rows] == [0]
+    assert set(rows[0]["orders"]) == {"match", "cancelled", "amount_delta"}
+    today = day_module.stream(CANONICAL_SEED, rows[0]["day"])
+    assert sum(rows[0]["orders"].values()) == len(today.orders)
 
 
 def test_the_inventory_holds_the_hash_of_every_sent_snapshot(inventory: dict, tmp_path):
