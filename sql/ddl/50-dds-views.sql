@@ -9,6 +9,9 @@
 --
 -- event_date берётся напрямую из EventDate. Пересчёт из event_time помешал бы
 -- первичному индексу отбирать день до чтения.
+--
+-- Europe/Samara задаёт пояс счётчика модельного мира. DDS отдаёт event_time
+-- в этой временной линзе.
 CREATE VIEW IF NOT EXISTS dds.event_v ON CLUSTER clickstream_cluster
 AS
 SELECT
