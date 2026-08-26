@@ -1,7 +1,9 @@
 # ADR 0010. Заказы в ODS: версии сущности вместо подмены слепка
 
 Дата: 16 августа 2026 года. Статус: принято. Частично заменяет
-[ADR 0008](0008-order-ingestion.md).
+[ADR 0008](0008-order-ingestion.md). Колонка версии пересмотрена
+[ADR 0014](0014-order-version-snapshot-date.md): вместо `updated_at` —
+`snapshot_date`.
 
 ## Решение
 
