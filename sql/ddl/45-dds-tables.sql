@@ -1,17 +1,17 @@
--- DDS: физическая модель заказа и донор её партиций.
+-- DDS: физические модели слоя и доноры их партиций.
+--
+-- Идемпотентность здесь устроена иначе, чем в приёме, и это главный урок обеих
+-- сущностей файла. В ODS повтор гасит колонка версии:
+-- ReplacingMergeTree(updated_at) оставляет позднюю строку. Здесь колонки
+-- версии нет вовсе — повтор гасит замена партиции целиком: день собирается
+-- заново и подменяется одним атомарным движением. Поэтому строка таблицы
+-- ровно одна на своё зерно, а чтению не нужен FINAL.
+
+-- Локальная таблица заказа.
 --
 -- Зерно — заказ в текущем состоянии, ключ order_id. Историю версий слой не
 -- хранит: у неё нет читателя ни в одной витрине, а ODS её и не обещает
 -- (docs/architecture/dds/order.md, «Зерно»).
---
--- Идемпотентность здесь устроена иначе, чем в приёме, и это главный урок
--- сущности. В ODS повтор гасит колонка версии: ReplacingMergeTree(updated_at)
--- оставляет позднюю строку. Здесь колонки версии нет вовсе — повтор гасит
--- замена партиции целиком: день собирается заново и подменяется одним
--- атомарным движением. Поэтому каждая строка таблицы — ровно один заказ, а
--- чтению не нужен FINAL.
-
--- Локальная таблица шарда.
 --
 -- Партиция — order_date, день заказа в поясе счётчика. Партиция дневная не
 -- ради размера куска, а потому что день — единица пересборки: пока заказ
@@ -93,3 +93,80 @@ ORDER BY order_id;
 CREATE TABLE IF NOT EXISTS dds.order_stage_dist ON CLUSTER clickstream_cluster
 AS dds.order_stage_rep
 ENGINE = Distributed('clickstream_cluster', 'dds', 'order_stage_rep', cityHash64(order_id));
+
+-- Локальная таблица сессии.
+--
+-- Зерно — визит: подряд идущие события одной куки без пауз длиннее тридцати
+-- минут, не пересекающие границу суток (CONTEXT.md, «Визит»). Сущность
+-- расчётная, в потоке её нет — слой режет и чеканит её сам
+-- (docs/architecture/dds/session.md).
+--
+-- Партиция — день сессии. У заказа день дышит внутри окна изменяемости, у
+-- сессии замерзает сразу: визит суток не пересекает, поэтому прожитый день
+-- собирается один раз и целиком. Отсюда и цена отказа: пропущенный день
+-- заказа вернуло бы в работу следующее окно, а день сессии вернёт только счёт
+-- хвоста от первой дыры (sql/dds/session_scope.sql).
+--
+-- Ключ сортировки — кука и начало сессии: тем же порядком идёт и нарезка, и
+-- чтение «визиты посетителя подряд». session_id в ключ не входит: он ручка
+-- для витрин и разбора расхождений, а не адрес строки.
+CREATE TABLE IF NOT EXISTS dds.session_rep ON CLUSTER clickstream_cluster
+(
+    -- Суррогат слоя: cityHash64 от куки и начала сессии. Детерминированность
+    -- несущая — пересборка партиции обязана отчеканить те же id
+    -- (docs/architecture/dds/session.md, «Идентификатор»).
+    session_id UInt64,
+    client_id UInt64,
+    session_date Date,
+    started_at DateTime('Europe/Samara'),
+    finished_at DateTime('Europe/Samara'),
+    duration_seconds UInt32,
+    -- Счётчики по типам событий: у визита Метрики на этом месте достигнутые
+    -- цели, которых стенд не шлёт.
+    events_total UInt32,
+    pageviews UInt32,
+    cart_adds UInt32,
+    purchases UInt32,
+    -- Вход и выход визита, как StartURL и EndURL у Метрики. Полного списка
+    -- страниц нет и у неё: топы считает витрина по событиям.
+    entry_url String,
+    exit_url String,
+    -- Атрибуция визита — метки его первого события.
+    utm_source String,
+    utm_medium String,
+    utm_campaign String,
+    utm_content String,
+    utm_term String,
+    -- Паспорт куки: устройство и город приписаны ей на всю жизнь, поэтому
+    -- берутся с первого события и внутри визита не меняются.
+    device_category LowCardinality(String),
+    region_city String,
+    _load_id String,
+    _load_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
+PARTITION BY session_date
+ORDER BY (client_id, started_at);
+
+-- Лицо загрузки и диагностики. Ключ шардирования — cityHash64(client_id), то
+-- же выражение, что у событий и у карты идентичностей
+-- (docs/architecture/storage.md, «Раскладка по шардам»). Ко-локация здесь не
+-- только про соединения: на ней стоит сама сборка — все события куки лежат на
+-- одном шарде, и нарезать их можно, не собирая куку с двух нод
+-- (sql/dds/session_rebuild.sql).
+CREATE TABLE IF NOT EXISTS dds.session_dist ON CLUSTER clickstream_cluster
+AS dds.session_rep
+ENGINE = Distributed('clickstream_cluster', 'dds', 'session_rep', cityHash64(client_id));
+
+-- Донор партиций сессии. Правило донора — в комментарии к dds.order_stage_rep
+-- выше: структура и ключи обязаны совпадать с целью, отсюда AS dds.session_rep
+-- и тот же ключ шардирования.
+CREATE TABLE IF NOT EXISTS dds.session_stage_rep ON CLUSTER clickstream_cluster
+AS dds.session_rep
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
+PARTITION BY session_date
+ORDER BY (client_id, started_at);
+
+CREATE TABLE IF NOT EXISTS dds.session_stage_dist ON CLUSTER clickstream_cluster
+AS dds.session_stage_rep
+ENGINE = Distributed('clickstream_cluster', 'dds', 'session_stage_rep', cityHash64(client_id));
