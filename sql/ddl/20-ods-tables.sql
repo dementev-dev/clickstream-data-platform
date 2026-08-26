@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS ods.event_rep ON CLUSTER clickstream_cluster
     GoalsReached Array(UInt32),
     ParsedParamsKey1 Array(String),
     purchaseID Array(String),
-    purchaseRevenue Array(Float64),
+    purchaseRevenue Array(Decimal(18, 2)),
     purchaseCurrency Array(String),
     purchaseCoupon Array(String),
     productID Array(String),

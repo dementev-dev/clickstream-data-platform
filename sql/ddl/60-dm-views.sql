@@ -15,6 +15,22 @@ SELECT
     _load_ts
 FROM dm.revenue_daily_dist;
 
+-- Непарные стороны остаются NULL. При join_use_nulls = 0 ClickHouse заполнил
+-- бы их нулями и пустыми строками, скрыв отсутствие источника.
+-- Служебные колонки называют запуск, который последним заменил день.
+CREATE VIEW IF NOT EXISTS dm.purchase_vs_orders_v ON CLUSTER clickstream_cluster
+AS
+SELECT
+    order_day,
+    order_id,
+    declared_revenue,
+    items_total,
+    status,
+    mismatch_class,
+    _load_id,
+    _load_ts
+FROM dm.purchase_vs_orders_dist;
+
 -- Полный пересчет пишет новую версию каждого дня. FINAL оставляет текущие
 -- счетчики и прячет повторы запусков от потребителя.
 CREATE VIEW IF NOT EXISTS dm.daily_traffic_v ON CLUSTER clickstream_cluster

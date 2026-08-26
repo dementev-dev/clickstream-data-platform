@@ -1,4 +1,4 @@
--- DM: физические дневные витрины и донор партиций выручки.
+-- DM: физические дневные витрины и доноры их партиций.
 
 -- Выручка хранится в зерне «день заказа × категория товара». День служит
 -- единицей пересборки, поэтому совпадает с ключом партиции.
@@ -46,6 +46,51 @@ ENGINE = Distributed(
     'dm',
     'revenue_daily_stage_rep',
     cityHash64(product_category)
+);
+
+-- Сверка хранит одну строку на заказ. День — единица пересборки: пока рядом
+-- живут два источника, строка может перейти из awaiting_order в обычный класс.
+CREATE TABLE IF NOT EXISTS dm.purchase_vs_orders_rep ON CLUSTER clickstream_cluster
+(
+    order_day Date,
+    order_id String,
+    declared_revenue Nullable(Decimal(18, 2)),
+    items_total Nullable(Decimal(18, 2)),
+    status LowCardinality(Nullable(String)),
+    mismatch_class LowCardinality(String),
+    _load_id String,
+    _load_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
+PARTITION BY order_day
+ORDER BY (order_day, order_id);
+
+-- Ключ совпадает с DDS, поэтому строка заказа на всех слоях попадает на один
+-- шард.
+CREATE TABLE IF NOT EXISTS dm.purchase_vs_orders_dist ON CLUSTER clickstream_cluster
+AS dm.purchase_vs_orders_rep
+ENGINE = Distributed(
+    'clickstream_cluster',
+    'dm',
+    'purchase_vs_orders_rep',
+    cityHash64(order_id)
+);
+
+-- Донор повторяет структуру и раскладку цели по правилу, разобранному у
+-- revenue_daily_stage_rep и в docs/architecture/storage.md.
+CREATE TABLE IF NOT EXISTS dm.purchase_vs_orders_stage_rep ON CLUSTER clickstream_cluster
+AS dm.purchase_vs_orders_rep
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')
+PARTITION BY order_day
+ORDER BY (order_day, order_id);
+
+CREATE TABLE IF NOT EXISTS dm.purchase_vs_orders_stage_dist ON CLUSTER clickstream_cluster
+AS dm.purchase_vs_orders_stage_rep
+ENGINE = Distributed(
+    'clickstream_cluster',
+    'dm',
+    'purchase_vs_orders_stage_rep',
+    cityHash64(order_id)
 );
 
 -- Трафик пересчитывается целиком: новая связь куки с пользователем меняет

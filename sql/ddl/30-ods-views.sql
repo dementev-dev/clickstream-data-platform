@@ -154,7 +154,11 @@ SELECT
     JSONExtract(raw, 'GoalsReached', 'Array(UInt32)') AS GoalsReached,
     JSONExtract(raw, 'ParsedParamsKey1', 'Array(String)') AS ParsedParamsKey1,
     JSONExtract(raw, 'purchaseID', 'Array(String)') AS purchaseID,
-    JSONExtract(raw, 'purchaseRevenue', 'Array(Float64)') AS purchaseRevenue,
+    -- Выгрузка несет JSON-числа типа Float64, но деньги хранятся в Decimal.
+    -- JSONExtract разбирает их сразу, без промежуточного двоичного числа:
+    -- синтаксис подтвержден документацией ClickHouse через Context7 и
+    -- запросом к стендовому ClickHouse 26.3 при исполнении #155.
+    JSONExtract(raw, 'purchaseRevenue', 'Array(Decimal(18, 2))') AS purchaseRevenue,
     JSONExtract(raw, 'purchaseCurrency', 'Array(String)') AS purchaseCurrency,
     JSONExtract(raw, 'purchaseCoupon', 'Array(String)') AS purchaseCoupon,
     JSONExtract(raw, 'productID', 'Array(String)') AS productID,
