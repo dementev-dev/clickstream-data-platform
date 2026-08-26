@@ -38,7 +38,7 @@
   [мост к склейке](identity.md).
 - **Приём — пакетный забор**: одно прямое чтение Kafka в STG, два
   `INSERT SELECT` в типизированный ODS и таблицу ошибок; `ods.order`
-  принимает версии заказа на `ReplacingMergeTree(updated_at)` —
+  принимает версии заказа на `ReplacingMergeTree(snapshot_date)` —
   [приём из Kafka в ODS](ingestion.md).
 - **Дальше заказ живёт моделью DDS** — уже по хранилищную сторону границы,
   в наборе слоя: [модель заказа](../dds/order.md).

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 from pathlib import Path
 
 from airflow.exceptions import AirflowException
@@ -35,11 +34,6 @@ START_DATE = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
 SQL_ROOT = Path("/opt/airflow/sql")
 CLICKHOUSE_CONNECTION = "clickhouse_default"
-
-# Окно изменяемости заказа, модельные дни: по нему трансформация решает, какие
-# дни ещё могут измениться. Число принадлежит миру, владелец — генератор;
-# почему у стенда лежит копия и чем она рискует — compose.yaml.
-ORDER_WINDOW_DAYS = int(os.environ["ORDER_WINDOW_DAYS"])
 
 # Позиция на оси модельного времени: номер первого несыгранного дня. Её ставит
 # пульт мира, и только она отличает прожитый день от живого — зачем это
@@ -125,7 +119,7 @@ def dds_transform():
             """Спросить у хранилища, какие дни собирает этот запуск."""
             query = (SQL_ROOT / "dds" / "order_scope.sql").read_text(encoding="utf-8")
             hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONNECTION)
-            row = hook.get_first(query, parameters={"window_days": ORDER_WINDOW_DAYS})
+            row = hook.get_first(query)
             # Пустой ответ означает пустой источник: собирать нечего, и
             # зеленеть на этом нельзя — прогон встаёт с внятной причиной.
             if row is None:
