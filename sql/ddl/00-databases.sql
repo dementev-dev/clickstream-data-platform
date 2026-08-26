@@ -17,6 +17,9 @@ CREATE DATABASE IF NOT EXISTS ods ON CLUSTER clickstream_cluster;
 -- База DDS заводится здесь же по той же причине, что и ODS.
 CREATE DATABASE IF NOT EXISTS dds ON CLUSTER clickstream_cluster;
 
+-- База витрин завершает цепочку STG → ODS → DDS → DM.
+CREATE DATABASE IF NOT EXISTS dm ON CLUSTER clickstream_cluster;
+
 -- Справочники стоят вне цепочки STG → ODS → DDS → DM: в хранилище их никто не
 -- производит, а читают их несколько слоёв — ADR 0012. Порядок слоёв к зоне не
 -- применяется, её файл идёт сразу за этим.

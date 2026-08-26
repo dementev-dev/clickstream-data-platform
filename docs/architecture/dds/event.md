@@ -89,10 +89,8 @@
 - Сборка сессий: ключи нарезки (`client_id`, `event_time`,
   `event_date`), тип события, страница, UTM, паспорт куки — категория
   устройства приходит уже расшифрованной.
-- Витрины `dm.events_enriched_v`, `dm.top_pages_daily_v`,
-  `dm.utm_effectiveness_v` (`declared_revenue` — из `purchase_revenue`),
-  `dm.daily_traffic_v` (пара «посетители / известные» через
-  `dds.identity_map_v`).
+- Витрины `dm.events_enriched_v`, `dm.top_pages_daily_v` и
+  `dm.utm_effectiveness_v` (`declared_revenue` берется из `purchase_revenue`).
 - Событийная сторона сверки `dm.purchase_vs_orders_v`: `purchase_id`,
   `purchase_revenue`, `event_date`.
 - DQ-сверка сессий с эталоном читает не его, а `ods.event_v` —
