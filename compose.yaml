@@ -48,6 +48,16 @@ x-kafka-target: &kafka-target
 
 x-world-starting-days: &world-starting-days "8"
 
+# Окно изменяемости заказа: слепок бэкенда несёт заказы последних K дней, за
+# окном заказ замерзает. Число принадлежит модельному миру, и владелец у него
+# один — generator/world.py (ORDER_WINDOW_DAYS): сделать окно настройкой
+# генератора значило бы разрешить менять физику мира снаружи, а опись мира
+# держится на её неизменности. Стенду копия нужна затем, что по этому же числу
+# трансформация DDS решает, какие дни пересобирать. Разойдутся — пересборка
+# промахнётся по краю окна. Сверять копии некому, и это осознанно: слепые пятна
+# конвейера собраны в docs/architecture/etl.md и адресованы контуру DQ.
+x-order-window-days: &order-window-days "7"
+
 x-airflow-common: &airflow-common
   image: clickstream-airflow:local
   build:
@@ -77,6 +87,7 @@ x-airflow-common: &airflow-common
     STAND_NETWORK: ${COMPOSE_PROJECT_NAME}_default
     WORLD_STARTING_DAYS: *world-starting-days
     KAFKA_ORDERS_TOPIC: *orders-topic
+    ORDER_WINDOW_DAYS: *order-window-days
   volumes:
     - ./dags:/opt/airflow/dags:ro
     # Запросы дагов: даг называет файл, а обработчик DAG при разборе загружает
