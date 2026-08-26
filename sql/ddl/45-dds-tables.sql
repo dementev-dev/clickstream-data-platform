@@ -86,8 +86,8 @@ ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{
 PARTITION BY order_date
 ORDER BY order_id;
 
--- Двойник шардируется тем же ключом, что цель, и это не украшение: REPLACE
--- PARTITION идёт по локальным таблицам, шард за шардом. Ляг строка заказа в
+-- Двойник шардируется тем же ключом, что цель. REPLACE PARTITION идёт по
+-- локальным таблицам, шард за шардом. Ляг строка заказа в
 -- доноре на другой шард, чем её место в цели, — подмена перенесла бы её не
 -- туда, и заказ пропал бы с одного шарда и задвоился на другом.
 CREATE TABLE IF NOT EXISTS dds.order_stage_dist ON CLUSTER clickstream_cluster
