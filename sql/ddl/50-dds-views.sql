@@ -99,3 +99,38 @@ SELECT
     _load_id,
     _load_ts
 FROM dds.order_dist;
+
+-- DDS: публичный договор сессии на языке бизнес-модели.
+--
+-- Под представлением — физическая модель, как у заказа: оконная нарезка
+-- визитов на каждое чтение означала бы считать сущность заново в каждом
+-- отчёте (docs/architecture/dds/session.md, «Отклонённые варианты»).
+--
+-- Эталонного VisitID в договоре нет намеренно: наша нарезка обязана уметь
+-- разойтись с эталоном, на этом стоит сверка. За эталоном она ходит в
+-- ods.event_v.
+CREATE VIEW IF NOT EXISTS dds.session_v ON CLUSTER clickstream_cluster
+AS
+SELECT
+    session_id,
+    client_id,
+    session_date,
+    started_at,
+    finished_at,
+    duration_seconds,
+    events_total,
+    pageviews,
+    cart_adds,
+    purchases,
+    entry_url,
+    exit_url,
+    utm_source,
+    utm_medium,
+    utm_campaign,
+    utm_content,
+    utm_term,
+    device_category,
+    region_city,
+    _load_id,
+    _load_ts
+FROM dds.session_dist;
