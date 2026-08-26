@@ -134,3 +134,17 @@ SELECT
     _load_id,
     _load_ts
 FROM dds.session_dist;
+
+-- DDS: точная известная связь куки с пользователем магазина.
+--
+-- Полный пересчёт оставляет физические версии одной пары до слияния частей.
+-- FINAL прячет это устройство от читателя; явный список колонок не даёт
+-- служебным изменениям таблицы случайно расширить договор.
+CREATE VIEW IF NOT EXISTS dds.identity_map_v ON CLUSTER clickstream_cluster
+AS
+SELECT
+    client_id,
+    user_id,
+    _load_id,
+    _load_ts
+FROM dds.identity_map_dist FINAL;

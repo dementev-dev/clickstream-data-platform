@@ -1,11 +1,7 @@
--- DDS: физические модели слоя и доноры их партиций.
+-- DDS: физические модели слоя и доноры партиций.
 --
--- Идемпотентность здесь устроена иначе, чем в приёме, и это главный урок обеих
--- сущностей файла. В ODS повтор гасит колонка версии: ReplacingMergeTree по
--- snapshot_date оставляет строку позднейшего слепка. Здесь колонки
--- версии нет вовсе — повтор гасит замена партиции целиком: день собирается
--- заново и подменяется одним атомарным движением. Поэтому строка таблицы
--- ровно одна на своё зерно, а чтению не нужен FINAL.
+-- Заказ и сессия гасят повтор заменой дневной партиции, без колонки версии.
+-- Карта идентичностей пересчитывается целиком и пишет новую версию пары.
 
 -- Локальная таблица заказа.
 --
@@ -170,3 +166,33 @@ ORDER BY (client_id, started_at);
 CREATE TABLE IF NOT EXISTS dds.session_stage_dist ON CLUSTER clickstream_cluster
 AS dds.session_stage_rep
 ENGINE = Distributed('clickstream_cluster', 'dds', 'session_stage_rep', cityHash64(client_id));
+
+-- DDS: известная связь куки трекера с пользователем магазина.
+--
+-- Полный запуск снова пишет все известные пары. Физические повторы до
+-- фонового слияния допустимы: _load_ts выбирает последнюю версию пары.
+-- Партиции нет, потому что карта пересчитывается целиком и её зерно не
+-- связано с днём.
+CREATE TABLE IF NOT EXISTS dds.identity_map_rep ON CLUSTER clickstream_cluster
+(
+    client_id UInt64,
+    user_id UInt64,
+    _load_id String,
+    _load_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplicatedReplacingMergeTree(
+    '/clickhouse/tables/{shard}/{database}/{table}',
+    '{replica}',
+    _load_ts
+)
+ORDER BY (client_id, user_id);
+
+-- Карта лежит по ключу будущего соединения с событиями и сессиями.
+CREATE TABLE IF NOT EXISTS dds.identity_map_dist ON CLUSTER clickstream_cluster
+AS dds.identity_map_rep
+ENGINE = Distributed(
+    'clickstream_cluster',
+    'dds',
+    'identity_map_rep',
+    cityHash64(client_id)
+);
