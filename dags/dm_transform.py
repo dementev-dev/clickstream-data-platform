@@ -3,9 +3,6 @@
 Выручка наследует ритм заказов и заменяет дневные партиции изменяемого окна.
 Трафик наследует ретроспективность карты идентичностей и пересчитывает всю
 историю новой версией. Объем каждого прогона выводится из состояния слоев.
-
-Форма DAG и динамическая замена сверены с публичным API Airflow 3 через
-Context7; DDL и REPLACE PARTITION — с документацией ClickHouse.
 """
 
 from __future__ import annotations
@@ -26,7 +23,7 @@ CLICKHOUSE_CONNECTION = "clickhouse_default"
 
 
 def _days(first_day: datetime.date, last_day: datetime.date) -> list[str]:
-    """Дни замены строками от левой до правой границы включительно."""
+    """Дни отрезка строками - в таком виде их ждет замена партиции."""
     return [
         (first_day + datetime.timedelta(days=shift)).isoformat()
         for shift in range((last_day - first_day).days + 1)
@@ -49,7 +46,6 @@ def replacements(scope: dict[str, object]) -> list[dict[str, object]]:
     start_date=START_DATE,
     is_paused_upon_creation=False,
     max_active_runs=1,
-    max_active_tasks=3,
     template_searchpath=str(SQL_ROOT),
     tags=["dm"],
 )
@@ -70,7 +66,8 @@ def dm_transform():
             row = hook.get_first(query)
             if row is None:
                 raise AirflowException(
-                    "нет слепка заказов в ODS или готовых заказов в DDS"
+                    "нет слепка заказов в ODS или готовых заказов в DDS; "
+                    "дождитесь загрузки слепка и сначала выполните dds_transform"
                 )
             first_day, last_day = row
             days = _days(first_day, last_day)
@@ -106,9 +103,10 @@ def dm_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dm/revenue_daily_replace.sql",
             do_xcom_push=False,
-            # Каждая замена поднимает отдельный процесс работника. Три
-            # одновременные задачи выбили его по памяти на первом прогоне;
-            # самим дням параллельность ничего не дает.
+            # Airflow 3 применяет этот лимит и к размноженным экземплярам
+            # (сверено через Context7). Каждая замена - отдельный процесс
+            # LocalExecutor; три разом исчерпали память контейнера scheduler,
+            # а самим дням параллельность ничего не дает.
             max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 

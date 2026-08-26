@@ -15,6 +15,8 @@ INSERT INTO dm.daily_traffic_dist
 SELECT
     sessions.session_date,
     uniqExact(sessions.client_id),
+    -- При стендовом join_use_nulls=0 непарный UInt64 получает 0. Условие
+    -- не дает анонимной сессии превратиться в известного пользователя.
     uniqExactIf(identities.user_id, identities.user_id != 0),
     {load_id:String},
     now64(3, 'UTC')
