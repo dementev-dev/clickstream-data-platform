@@ -65,3 +65,37 @@ SELECT
     productQuantity AS product_quantity,
     productEventType AS product_event_type
 FROM ods.event_v;
+
+-- DDS: публичный договор заказа на языке бизнес-модели.
+--
+-- В отличие от события, у заказа под представлением лежит физическая модель:
+-- разбор позиций и пересчёт пояса стоят денег, и платить их при каждом чтении
+-- значило бы собирать модель заново на лету (docs/architecture/dds/order.md,
+-- «Отклонённые варианты»). Представление здесь ничего не вычисляет — оно
+-- только называет колонки, которые слой обещает читателю.
+--
+-- FINAL нет и не будет: строка на заказ одна по построению, повтор гасит
+-- замена партиции, а не колонка версии.
+--
+-- Служебные колонки перечислены наравне с деловыми — это координаты
+-- собственной загрузки слоя, и расследование происшествия начинается с них:
+-- по _load_id видно, какой запуск собрал день.
+CREATE VIEW IF NOT EXISTS dds.order_v ON CLUSTER clickstream_cluster
+AS
+SELECT
+    order_id,
+    user_id,
+    status,
+    order_date,
+    created_at,
+    updated_at,
+    items_total,
+    discount,
+    delivery,
+    total,
+    item_sku,
+    item_quantity,
+    item_price,
+    _load_id,
+    _load_ts
+FROM dds.order_dist;
