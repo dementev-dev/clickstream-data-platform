@@ -1,0 +1,43 @@
+"""Дневной конвейер: сначала DDS, затем DM.
+
+Своих преобразований у дага нет. Ждущие триггеры связывают состояния:
+если слой краснеет, конвейер не запускает следующий слой и краснеет сам.
+"""
+
+from __future__ import annotations
+
+import datetime
+
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.sdk import dag
+
+START_DATE = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+
+
+@dag(
+    dag_id="etl_pipeline",
+    schedule=None,
+    start_date=START_DATE,
+    is_paused_upon_creation=False,
+    max_active_runs=1,
+    tags=["etl"],
+)
+def etl_pipeline():
+    """Собрать слои последовательно по текущему состоянию данных."""
+    dds = TriggerDagRunOperator(
+        task_id="trigger_dds",
+        trigger_dag_id="dds_transform",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
+    dm = TriggerDagRunOperator(
+        task_id="trigger_dm",
+        trigger_dag_id="dm_transform",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
+
+    dds >> dm
+
+
+etl_pipeline()

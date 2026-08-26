@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
+import time
 from pathlib import Path
 
 from airflow.exceptions import AirflowException
@@ -34,11 +36,192 @@ START_DATE = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
 SQL_ROOT = Path("/opt/airflow/sql")
 CLICKHOUSE_CONNECTION = "clickhouse_default"
+CLICKHOUSE_CLUSTER = "clickstream_cluster"
+
+KAFKA_BOOTSTRAP_SERVERS = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
+HITS_TOPIC = os.environ["KAFKA_TOPIC"]
+HITS_GROUP = "clickstream_hits"
+HITS_PARTITIONS = (0, 1)
+
+READINESS_TIMEOUT_SECONDS = 300
+READINESS_POLL_SECONDS = 3
 
 # Позиция на оси модельного времени: номер первого несыгранного дня. Её ставит
 # пульт мира, и только она отличает прожитый день от живого — зачем это
 # сессиям, разобрано в sql/dds/session_scope.sql.
 WORLD_POSITION = "world_position"
+
+
+def _kafka_readiness() -> tuple[bool, str]:
+    """Получить подтвержденные и верхние смещения обоих разделов событий."""
+    from confluent_kafka import Consumer, ConsumerGroupTopicPartitions, TopicPartition
+    from confluent_kafka.admin import AdminClient
+
+    admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
+    groups = admin.list_consumer_groups(request_timeout=10).result()
+    if groups.errors:
+        raise RuntimeError(f"Kafka не вернула список групп: {groups.errors}")
+
+    group_exists = any(group.group_id == HITS_GROUP for group in groups.valid)
+    committed: dict[int, int] = {}
+    if group_exists:
+        request = ConsumerGroupTopicPartitions(
+            HITS_GROUP,
+            [TopicPartition(HITS_TOPIC, partition) for partition in HITS_PARTITIONS],
+        )
+        result = admin.list_consumer_group_offsets([request], request_timeout=10)[
+            HITS_GROUP
+        ].result()
+        for topic_partition in result.topic_partitions:
+            if topic_partition.error is None and topic_partition.offset >= 0:
+                committed[topic_partition.partition] = topic_partition.offset
+
+    high_watermarks: dict[int, int] = {}
+    watermark_errors: dict[int, str] = {}
+    consumer = Consumer(
+        {
+            "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+            # Клиент требует group.id, но без подписки и poll() в группу не
+            # входит: здесь он только запрашивает верхние смещения топика.
+            "group.id": "etl-readiness",
+            "enable.auto.commit": False,
+        }
+    )
+    try:
+        for partition in HITS_PARTITIONS:
+            try:
+                bounds = consumer.get_watermark_offsets(
+                    TopicPartition(HITS_TOPIC, partition), timeout=10
+                )
+                if bounds is not None and bounds[1] >= 0:
+                    high_watermarks[partition] = bounds[1]
+            except Exception as error:
+                watermark_errors[partition] = str(error)
+    finally:
+        consumer.close()
+
+    all_known = group_exists
+    total_lag = 0
+    parts: list[str] = []
+    for partition in HITS_PARTITIONS:
+        offset = committed.get(partition)
+        high = high_watermarks.get(partition)
+        lag = high - offset if offset is not None and high is not None else None
+        if lag is None or lag < 0:
+            all_known = False
+        else:
+            total_lag += lag
+        logging.info(
+            "Kafka %s[%s]: подтверждено=%s, верхнее смещение=%s, отставание=%s",
+            HITS_TOPIC,
+            partition,
+            offset,
+            high,
+            lag,
+        )
+        parts.append(
+            f"{HITS_TOPIC}[{partition}]: подтверждено={offset}, "
+            f"верхнее смещение={high}, отставание={lag}"
+        )
+        if partition in watermark_errors:
+            parts[-1] += (
+                f", ошибка чтения верхнего смещения={watermark_errors[partition]}"
+            )
+
+    if not group_exists:
+        logging.info("группа потребителей %s отсутствует", HITS_GROUP)
+    lag_text = str(total_lag) if all_known else "неизвестно"
+    logging.info("суммарное отставание Kafka: %s", lag_text)
+    detail = "; ".join(parts)
+    if not group_exists:
+        detail = f"группа {HITS_GROUP} отсутствует; {detail}"
+    return all_known and total_lag == 0, detail
+
+
+def _delivery_queue_readiness() -> tuple[bool, str]:
+    """Получить число недоставленных файлов событий на каждой ноде."""
+    query = f"""
+        SELECT
+            node,
+            sum(queued_files) AS files,
+            arrayStringConcat(
+                groupArrayIf(
+                    last_exception,
+                    queued_files > 0 AND notEmpty(last_exception)
+                ),
+                '; '
+            ) AS last_exception
+        FROM
+        (
+            SELECT
+                hostName() AS node,
+                toUInt64(0) AS queued_files,
+                '' AS last_exception
+            FROM clusterAllReplicas('{CLICKHOUSE_CLUSTER}', system.one)
+
+            UNION ALL
+
+            SELECT
+                hostName(),
+                data_files + broken_data_files AS queued_files,
+                last_exception
+            FROM clusterAllReplicas(
+                '{CLICKHOUSE_CLUSTER}', system.distribution_queue
+            )
+            WHERE database = 'ods' AND table = 'event_dist'
+        )
+        GROUP BY node
+        ORDER BY node
+    """
+    rows = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONNECTION).get_records(query)
+    ready = True
+    nodes: list[str] = []
+    for node, files, last_exception in rows:
+        files = int(files)
+        ready = ready and files == 0
+        logging.info(
+            "очередь ods.event_dist на %s: файлов=%s, последняя ошибка=%s",
+            node,
+            files,
+            last_exception or "нет",
+        )
+        detail = f"{node}: файлов={files}"
+        if last_exception:
+            detail += f", последняя ошибка={last_exception}"
+        nodes.append(detail)
+    return ready, "; ".join(nodes)
+
+
+def _wait_for_phase(
+    probe,
+    phase: str,
+    deadline: float,
+) -> None:
+    """Дождаться прохождения одного барьера до общего крайнего срока."""
+    last_observation = "первый опрос не выполнен"
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        try:
+            ready, last_observation = probe()
+            last_error = None
+        except Exception as error:
+            ready = False
+            last_error = str(error)
+            logging.warning("%s: ошибка опроса: %s", phase, last_error)
+        if ready:
+            return
+
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(READINESS_POLL_SECONDS, remaining))
+
+    detail = last_observation
+    if last_error:
+        detail += f"; ошибка последнего опроса: {last_error}"
+    raise AirflowException(
+        f"общий срок ожидания готовности в {READINESS_TIMEOUT_SECONDS} с "
+        f'истек на этапе "{phase}": {detail}'
+    )
 
 
 def _world_position() -> int:
@@ -109,6 +292,17 @@ def replacements(scope: dict[str, object]) -> list[dict[str, object]]:
 )
 def dds_transform():
     """Пересобрать сущности DDS по текущему состоянию источников."""
+
+    @task
+    def wait_for_source() -> None:
+        """Дождаться чтения событий из Kafka и их доставки в ODS."""
+        deadline = time.monotonic() + READINESS_TIMEOUT_SECONDS
+        _wait_for_phase(_kafka_readiness, "Kafka", deadline)
+        _wait_for_phase(
+            _delivery_queue_readiness,
+            "очередь доставки ClickHouse",
+            deadline,
+        )
 
     @task_group(group_id="order")
     def order():
@@ -229,8 +423,10 @@ def dds_transform():
 
         rebuild >> replace
 
+    source_ready = wait_for_source()
     orders = order()
-    session()
+    sessions = session()
+    source_ready >> [orders, sessions]
 
     identity_map = SQLExecuteQueryOperator(
         task_id="identity_map",

@@ -1,9 +1,10 @@
 """Создание и пересоздание прикладного мира.
 
 Compose поднимает службы, а этот граф создаёт всё прикладное поверх них:
-топики, схему ClickHouse, данные стартовых дней и позицию модельного времени.
-`world_initialize` безопасен для обычного `make up`; `world_recreate` — явная
-операция обслуживания, которая сначала объявляет прежний мир недействительным.
+топики, схему ClickHouse, данные стартовых дней, позицию модельного времени и
+готовые слои. `world_initialize` безопасен для обычного `make up`;
+`world_recreate` — явная операция обслуживания, которая сначала объявляет
+прежний мир недействительным.
 
 Контракт состояний и доводы — ADR 0013 и спека жизненного цикла мира.
 """
@@ -262,9 +263,15 @@ def world_initialize():
         poke_interval=10,
     )
     position = remember_starting_position()
+    etl = TriggerDagRunOperator(
+        task_id="trigger_etl_pipeline",
+        trigger_dag_id="etl_pipeline",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
 
     route >> [ready, topics]
-    chain(topics, *ddl_tasks, image, events, arrived, snapshots, orders, position)
+    chain(topics, *ddl_tasks, image, events, arrived, snapshots, orders, position, etl)
 
 
 @dag(

@@ -12,6 +12,9 @@
 идут отправка слепка тем же контейнером генератора и ждущий триггер дага приёма
 `orders_ingest`.
 
+Живой день после установки позиции дожидается еще и `etl_pipeline`. Пачка
+только разгоняет источники: слои после нее менти догоняет ручным запуском.
+
 Разделение не косметическое. Расписание на самом работнике заставило бы кнопку
 паузы значить две вещи разом — «мир не едет сам» и «даг выключен», — а работник
 при этом выглядел бы в списке выключенным, хотя нажимают его каждый день.
@@ -209,7 +212,14 @@ def world_live_day():
         ["snapshot", "--day", PLAYED_DAY, "--topic", ORDERS_TOPIC],
     )
 
-    first_day >> played >> sent >> _ingest_orders() >> remember_played(first_day)
+    position = remember_played(first_day)
+    etl = TriggerDagRunOperator(
+        task_id="trigger_etl_pipeline",
+        trigger_dag_id="etl_pipeline",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
+    first_day >> played >> sent >> _ingest_orders() >> position >> etl
 
 
 @dag(
