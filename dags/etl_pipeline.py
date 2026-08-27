@@ -1,4 +1,4 @@
-"""Дневной конвейер: сначала DDS, затем DM.
+"""Дневной конвейер: DDS, DM и проверка качества.
 
 Своих преобразований у дага нет. Ждущие триггеры связывают состояния:
 если слой краснеет, конвейер не запускает следующий слой и краснеет сам.
@@ -36,8 +36,18 @@ def etl_pipeline():
         wait_for_completion=True,
         poke_interval=10,
     )
+    # Airflow 3.3: оператор провайдера standard с wait_for_completion=True
+    # поднимает AirflowException, если запущенный даг завершился красным.
+    # Поведение и путь импорта повторно сверены через Context7 27 августа
+    # 2026 года.
+    dq = TriggerDagRunOperator(
+        task_id="trigger_dq",
+        trigger_dag_id="dq_check",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
 
-    dds >> dm
+    dds >> dm >> dq
 
 
 etl_pipeline()

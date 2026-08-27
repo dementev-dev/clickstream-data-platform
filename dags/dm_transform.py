@@ -76,9 +76,6 @@ def replacements(scope: dict[str, object]) -> list[dict[str, object]]:
     start_date=START_DATE,
     is_paused_upon_creation=False,
     max_active_runs=1,
-    # Каждая задача LocalExecutor - отдельный процесс. Четыре процесса уже
-    # дали SIGKILL при лимите scheduler 640 МиБ; три - измеренный потолок DDS.
-    max_active_tasks=3,
     template_searchpath=str(SQL_ROOT),
     tags=["dm"],
 )
@@ -136,11 +133,6 @@ def dm_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dm/revenue_daily_replace.sql",
             do_xcom_push=False,
-            # Airflow 3 применяет этот лимит и к размноженным экземплярам
-            # (сверено через Context7). Каждая замена - отдельный процесс
-            # LocalExecutor; три разом исчерпали память контейнера scheduler,
-            # а самим дням параллельность ничего не дает.
-            max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 
         rebuild >> replace
@@ -198,8 +190,6 @@ def dm_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dm/purchase_vs_orders_replace.sql",
             do_xcom_push=False,
-            # Причина единицы разобрана у revenue_daily.replace выше.
-            max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 
         rebuild >> replace
