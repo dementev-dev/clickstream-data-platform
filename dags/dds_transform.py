@@ -53,9 +53,9 @@ WORLD_POSITION = "world_position"
 
 
 def _kafka_readiness() -> tuple[bool, str]:
-    """Получить подтвержденные и верхние смещения обоих разделов событий."""
-    from confluent_kafka import Consumer, ConsumerGroupTopicPartitions, TopicPartition
-    from confluent_kafka.admin import AdminClient
+    """Проверить, дочитала ли группа оба раздела событий."""
+    from confluent_kafka import ConsumerGroupTopicPartitions, TopicPartition
+    from confluent_kafka.admin import AdminClient, OffsetSpec
 
     admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
     groups = admin.list_consumer_groups(request_timeout=10).result()
@@ -78,27 +78,22 @@ def _kafka_readiness() -> tuple[bool, str]:
 
     high_watermarks: dict[int, int] = {}
     watermark_errors: dict[int, str] = {}
-    consumer = Consumer(
+    # OffsetSpec.latest возвращает следующее смещение после хвоста; сверено
+    # через Context7 и на установленном confluent-kafka 2.15.0.
+    latest = admin.list_offsets(
         {
-            "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
-            # Клиент требует group.id, но без подписки и poll() в группу не
-            # входит: здесь он только запрашивает верхние смещения топика.
-            "group.id": "etl-readiness",
-            "enable.auto.commit": False,
-        }
+            TopicPartition(HITS_TOPIC, partition): OffsetSpec.latest()
+            for partition in HITS_PARTITIONS
+        },
+        request_timeout=10,
     )
-    try:
-        for partition in HITS_PARTITIONS:
-            try:
-                bounds = consumer.get_watermark_offsets(
-                    TopicPartition(HITS_TOPIC, partition), timeout=10
-                )
-                if bounds is not None and bounds[1] >= 0:
-                    high_watermarks[partition] = bounds[1]
-            except Exception as error:
-                watermark_errors[partition] = str(error)
-    finally:
-        consumer.close()
+    for topic_partition, future in latest.items():
+        try:
+            offset = future.result().offset
+            if offset >= 0:
+                high_watermarks[topic_partition.partition] = offset
+        except Exception as error:
+            watermark_errors[topic_partition.partition] = str(error)
 
     all_known = group_exists
     total_lag = 0
@@ -139,7 +134,7 @@ def _kafka_readiness() -> tuple[bool, str]:
 
 
 def _delivery_queue_readiness() -> tuple[bool, str]:
-    """Получить число недоставленных файлов событий на каждой ноде."""
+    """Проверить, пуста ли очередь доставки событий на каждой ноде."""
     query = f"""
         SELECT
             node,
@@ -153,6 +148,8 @@ def _delivery_queue_readiness() -> tuple[bool, str]:
             ) AS last_exception
         FROM
         (
+            -- У пустой очереди нет строк; system.one оставляет обе ноды
+            -- видимыми и в зеленом опросе.
             SELECT
                 hostName() AS node,
                 toUInt64(0) AS queued_files,

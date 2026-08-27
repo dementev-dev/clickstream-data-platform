@@ -240,7 +240,8 @@ Kafka → STG → ODS, и живёт он в `make check-clickhouse`.
 **Приемка #156 27 августа 2026 года.** `make rebuild-storage` занял 7 минут.
 На чистом прикладном мире `world_initialize` сам довел позицию до `8`, дождался
 `etl_pipeline` и оставил заполненными DDS и обе витрины. После пересборки прошли
-`make smoke` 21/21 и `make check-clickhouse` 10/10.
+`make smoke` 21/21 и `make check-clickhouse` 10/10. Перед стендовыми сценариями
+прошли `make config-test` и `make lint`.
 
 Два прогона `world_next_day` не изменили слои; один ручной `etl_pipeline` без
 параметров догнал оба дня. Полный прогон `world_live_day` занял 27 м 2 с и
