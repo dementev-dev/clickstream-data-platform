@@ -279,11 +279,6 @@ def replacements(scope: dict[str, object]) -> list[dict[str, object]]:
     # Два прогона разом собирали бы один и тот же двойник: второй затёр бы
     # чужую сборку между вставкой и заменой партиций.
     max_active_runs=1,
-    # Потолок на задачи в прогоне. Размноженная замена норовит выстрелить
-    # всеми днями сразу, а каждая задача — свой процесс исполнителя, и
-    # планировщику отведено 640 МиБ (compose.yaml). Замерено: тринадцать дней
-    # двух сущностей без потолка кончаются SIGKILL от контрольной группы.
-    max_active_tasks=3,
     template_searchpath=str(SQL_ROOT),
     tags=["dds"],
 )
@@ -355,10 +350,6 @@ def dds_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dds/order_replace.sql",
             do_xcom_push=False,
-            # Замены не зависят друг от друга, но каждая — отдельный процесс
-            # LocalExecutor. Три разом получили SIGKILL при лимите scheduler
-            # 640 МиБ; последовательность не меняет деловой результат.
-            max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 
         rebuild >> replace
@@ -420,8 +411,6 @@ def dds_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dds/session_replace.sql",
             do_xcom_push=False,
-            # Причина единицы разобрана у order.replace выше.
-            max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 
         rebuild >> replace

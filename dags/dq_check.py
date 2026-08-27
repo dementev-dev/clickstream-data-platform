@@ -11,7 +11,6 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-from collections import defaultdict
 from pathlib import Path
 
 from airflow.exceptions import AirflowException
@@ -69,55 +68,40 @@ def _world_position() -> int:
     return position
 
 
-def _write_summary(
+def _publish_summary(
     check_name: str,
-    comparisons: list[tuple[object, ...]],
+    summaries: list[tuple[object, ...]],
 ) -> list[str]:
-    """Свернуть строки деловых ключей в дневную сводку и малый срез ошибок."""
-    if not comparisons:
+    """Записать дневную сводку и вернуть малый срез готовой диагностики."""
+    if not summaries:
         raise AirflowException(f"{check_name}: область проверки пуста")
 
-    totals: dict[datetime.date, list[int]] = defaultdict(lambda: [0, 0, 0])
     diagnostics: list[str] = []
-    for (
-        data_date,
-        business_key,
-        reference_present,
-        actual_present,
-        reference_value,
-        actual_value,
-        failed,
-    ) in comparisons:
-        counts = totals[data_date]
-        counts[0] += int(reference_present)
-        counts[1] += int(actual_present)
-        counts[2] += int(failed)
-        if failed and len(diagnostics) < DETAIL_LIMIT:
-            reference_text = reference_value if reference_present else "нет ключа"
-            actual_text = actual_value if actual_present else "нет ключа"
-            diagnostics.append(
-                f"{data_date} key={business_key}: "
-                f"эталон={reference_text}, объект={actual_text}"
-            )
-
     context = get_current_context()
     load_id = context["run_id"]
     load_ts = datetime.datetime.now(datetime.UTC)
-    rows = [
-        (
-            data_date,
-            check_name,
-            reference_rows,
-            actual_rows,
-            failed_rows,
-            "pass" if failed_rows == 0 else "fail",
-            load_id,
-            load_ts,
+    rows = []
+    for (
+        data_date,
+        reference_rows,
+        actual_rows,
+        failed_rows,
+        details,
+    ) in summaries:
+        rows.append(
+            (
+                data_date,
+                check_name,
+                reference_rows,
+                actual_rows,
+                failed_rows,
+                "pass" if failed_rows == 0 else "fail",
+                load_id,
+                load_ts,
+            )
         )
-        for data_date, (reference_rows, actual_rows, failed_rows) in sorted(
-            totals.items()
-        )
-    ]
+        diagnostics.extend(details[: DETAIL_LIMIT - len(diagnostics)])
+
     _clickhouse_hook().bulk_insert_rows(
         "dm.dq_summary_stage_dist",
         rows,
@@ -126,17 +110,31 @@ def _write_summary(
     return diagnostics
 
 
+def _build_sql_check(
+    check_name: str,
+    sql_name: str,
+    parameters: dict[str, object] | None = None,
+) -> list[str]:
+    """Выполнить SQL-сверку и записать ее дневные итоги в донор."""
+    query = (SQL_ROOT / "dq" / sql_name).read_text(encoding="utf-8")
+    summaries = _clickhouse_hook().get_records(query, parameters=parameters)
+    return _publish_summary(check_name, summaries)
+
+
 @task
 def build_sql_check(check_name: str, sql_name: str) -> list[str]:
-    """Выполнить одну SQL-сверку и записать ее дневные итоги в донор."""
-    query = (SQL_ROOT / "dq" / sql_name).read_text(encoding="utf-8")
-    parameters = (
-        {"position": _world_position()}
-        if check_name == "sessions_vs_reference"
-        else None
+    """Собрать проверку, которой не нужны координаты модельного мира."""
+    return _build_sql_check(check_name, sql_name)
+
+
+@task
+def build_sessions_vs_reference() -> list[str]:
+    """Сверить сессии только в пределах прожитых дней мира."""
+    return _build_sql_check(
+        "sessions_vs_reference",
+        "sessions_vs_reference.sql",
+        parameters={"position": _world_position()},
     )
-    comparisons = _clickhouse_hook().get_records(query, parameters=parameters)
-    return _write_summary(check_name, comparisons)
 
 
 @task
@@ -158,19 +156,29 @@ def build_classes_vs_inventory() -> list[str]:
         for data_date, mismatch_class, count in _clickhouse_hook().get_records(query)
         if (data_date, mismatch_class) in expected
     }
-    comparisons = [
-        (
-            data_date,
-            mismatch_class,
-            1,
-            int((data_date, mismatch_class) in actual),
-            reference_count,
-            actual.get((data_date, mismatch_class)),
-            reference_count != actual.get((data_date, mismatch_class)),
-        )
-        for (data_date, mismatch_class), reference_count in sorted(expected.items())
-    ]
-    return _write_summary("classes_vs_inventory", comparisons)
+    summaries = []
+    for data_date in sorted({day for day, _ in expected}):
+        details = []
+        reference_rows = 0
+        actual_rows = 0
+        failed_rows = 0
+        for (day, mismatch_class), reference_count in sorted(expected.items()):
+            if day != data_date:
+                continue
+            actual_key = (day, mismatch_class)
+            actual_count = actual.get(actual_key)
+            reference_rows += 1
+            actual_rows += int(actual_key in actual)
+            if reference_count != actual_count:
+                failed_rows += 1
+                actual_text = actual_count if actual_count is not None else "нет ключа"
+                details.append(
+                    f"{day} key={mismatch_class}: "
+                    f"эталон={reference_count}, "
+                    f"объект={actual_text}"
+                )
+        summaries.append((data_date, reference_rows, actual_rows, failed_rows, details))
+    return _publish_summary("classes_vs_inventory", summaries)
 
 
 @task
@@ -186,7 +194,7 @@ def publication_scope() -> list[dict[str, dict[str, str]]]:
 
 @task
 def drop_stale_partitions() -> None:
-    """Убрать дни, которые после полного прогона не покрывает ни одна сторона."""
+    """Убрать дни, исчезнувшие после починки с обеих сторон сверки."""
     hook = _clickhouse_hook()
     stale_days = hook.get_records(
         """
@@ -237,10 +245,6 @@ def assert_check(check_name: str, diagnostics: list[str]) -> None:
     start_date=START_DATE,
     is_paused_upon_creation=False,
     max_active_runs=1,
-    # Три одновременные сверки на живом мире исчерпали 640 МиБ scheduler и
-    # получили SIGKILL. Последовательность здесь дешева: весь даг укладывается
-    # в один учебный прогон, а общему донору параллельность ничего не даёт.
-    max_active_tasks=1,
     template_searchpath=str(SQL_ROOT),
     tags=["dq"],
 )
@@ -253,9 +257,7 @@ def dq_check():
         do_xcom_push=False,
     )
 
-    sessions = build_sql_check.override(task_id="build_sessions_vs_reference")(
-        "sessions_vs_reference", "sessions_vs_reference.sql"
-    )
+    sessions = build_sessions_vs_reference()
     classes = build_classes_vs_inventory.override(
         task_id="build_classes_vs_inventory"
     )()
@@ -280,9 +282,6 @@ def dq_check():
         conn_id=CLICKHOUSE_CONNECTION,
         sql="dq/replace.sql",
         do_xcom_push=False,
-        # Каждая замена — отдельный процесс LocalExecutor. Последовательность
-        # держит даг в измеренном лимите памяти планировщика.
-        max_active_tis_per_dag=1,
     ).expand_kwargs(days)
 
     sessions_assertion = assert_check.override(task_id="sessions_vs_reference")(

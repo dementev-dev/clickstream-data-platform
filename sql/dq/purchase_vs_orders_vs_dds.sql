@@ -57,39 +57,64 @@ WITH
         GROUP BY
             order_day,
             order_id
+    ),
+    comparison AS
+    (
+        SELECT
+            coalesce(reference.order_day, actual.order_day) AS data_date,
+            coalesce(reference.order_id, actual.order_id) AS business_key,
+            isNotNull(reference.order_id) AS reference_present,
+            isNotNull(actual.order_id) AS actual_present,
+            toString(tuple(
+                reference.declared_revenue,
+                reference.items_total,
+                reference.status,
+                reference.mismatch_class
+            )) AS reference_value,
+            concat(
+                toString(tuple(
+                    actual.declared_revenue,
+                    actual.items_total,
+                    actual.status,
+                    actual.mismatch_class
+                )),
+                ', rows=',
+                toString(actual.physical_rows)
+            ) AS actual_value,
+            isNull(reference.order_id)
+                OR isNull(actual.order_id)
+                OR actual.physical_rows != 1
+                OR NOT isNotDistinctFrom(
+                    reference.declared_revenue,
+                    actual.declared_revenue
+                )
+                OR NOT isNotDistinctFrom(reference.items_total, actual.items_total)
+                OR NOT isNotDistinctFrom(reference.status, actual.status)
+                OR NOT isNotDistinctFrom(
+                    reference.mismatch_class,
+                    actual.mismatch_class
+                ) AS failed
+        FROM reference
+        GLOBAL FULL OUTER JOIN actual USING (order_day, order_id)
     )
 SELECT
-    coalesce(reference.order_day, actual.order_day) AS data_date,
-    coalesce(reference.order_id, actual.order_id) AS business_key,
-    isNotNull(reference.order_id) AS reference_present,
-    isNotNull(actual.order_id) AS actual_present,
-    toString(tuple(
-        reference.declared_revenue,
-        reference.items_total,
-        reference.status,
-        reference.mismatch_class
-    )) AS reference_value,
-    concat(
-        toString(tuple(
-            actual.declared_revenue,
-            actual.items_total,
-            actual.status,
-            actual.mismatch_class
-        )),
-        ', rows=',
-        toString(actual.physical_rows)
-    ) AS actual_value,
-    isNull(reference.order_id)
-        OR isNull(actual.order_id)
-        OR actual.physical_rows != 1
-        OR NOT isNotDistinctFrom(reference.declared_revenue, actual.declared_revenue)
-        OR NOT isNotDistinctFrom(reference.items_total, actual.items_total)
-        OR NOT isNotDistinctFrom(reference.status, actual.status)
-        OR NOT isNotDistinctFrom(reference.mismatch_class, actual.mismatch_class)
-        AS failed
-FROM reference
-GLOBAL FULL OUTER JOIN actual USING (order_day, order_id)
-ORDER BY
     data_date,
-    business_key
+    countIf(reference_present) AS reference_rows,
+    countIf(actual_present) AS actual_rows,
+    countIf(failed) AS failed_rows,
+    groupArrayIf(20)(
+        concat(
+            toString(data_date),
+            ' key=',
+            business_key,
+            ': эталон=',
+            if(reference_present, reference_value, 'нет ключа'),
+            ', объект=',
+            if(actual_present, actual_value, 'нет ключа')
+        ),
+        failed
+    ) AS diagnostics
+FROM comparison
+GROUP BY data_date
+ORDER BY data_date
 SETTINGS join_use_nulls = 1

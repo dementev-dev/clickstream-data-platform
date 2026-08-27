@@ -49,29 +49,59 @@ WITH
         GROUP BY
             report_date,
             product_category
+    ),
+    comparison AS
+    (
+        SELECT
+            coalesce(reference.report_date, actual.report_date) AS data_date,
+            coalesce(reference.product_category, actual.product_category)
+                AS business_key,
+            isNotNull(reference.product_category) AS reference_present,
+            isNotNull(actual.product_category) AS actual_present,
+            toString(tuple(
+                reference.orders,
+                reference.units,
+                reference.revenue,
+                reference.aov
+            )) AS reference_value,
+            concat(
+                toString(tuple(
+                    actual.orders,
+                    actual.units,
+                    actual.revenue,
+                    actual.aov
+                )),
+                ', rows=',
+                toString(actual.physical_rows)
+            ) AS actual_value,
+            isNull(reference.product_category)
+                OR isNull(actual.product_category)
+                OR actual.physical_rows != 1
+                OR NOT isNotDistinctFrom(reference.orders, actual.orders)
+                OR NOT isNotDistinctFrom(reference.units, actual.units)
+                OR NOT isNotDistinctFrom(reference.revenue, actual.revenue)
+                OR NOT isNotDistinctFrom(reference.aov, actual.aov) AS failed
+        FROM reference
+        GLOBAL FULL OUTER JOIN actual USING (report_date, product_category)
     )
 SELECT
-    coalesce(reference.report_date, actual.report_date) AS data_date,
-    coalesce(reference.product_category, actual.product_category) AS business_key,
-    isNotNull(reference.product_category) AS reference_present,
-    isNotNull(actual.product_category) AS actual_present,
-    toString(tuple(reference.orders, reference.units, reference.revenue, reference.aov))
-        AS reference_value,
-    concat(
-        toString(tuple(actual.orders, actual.units, actual.revenue, actual.aov)),
-        ', rows=',
-        toString(actual.physical_rows)
-    ) AS actual_value,
-    isNull(reference.product_category)
-        OR isNull(actual.product_category)
-        OR actual.physical_rows != 1
-        OR NOT isNotDistinctFrom(reference.orders, actual.orders)
-        OR NOT isNotDistinctFrom(reference.units, actual.units)
-        OR NOT isNotDistinctFrom(reference.revenue, actual.revenue)
-        OR NOT isNotDistinctFrom(reference.aov, actual.aov) AS failed
-FROM reference
-GLOBAL FULL OUTER JOIN actual USING (report_date, product_category)
-ORDER BY
     data_date,
-    business_key
+    countIf(reference_present) AS reference_rows,
+    countIf(actual_present) AS actual_rows,
+    countIf(failed) AS failed_rows,
+    groupArrayIf(20)(
+        concat(
+            toString(data_date),
+            ' key=',
+            business_key,
+            ': эталон=',
+            if(reference_present, reference_value, 'нет ключа'),
+            ', объект=',
+            if(actual_present, actual_value, 'нет ключа')
+        ),
+        failed
+    ) AS diagnostics
+FROM comparison
+GROUP BY data_date
+ORDER BY data_date
 SETTINGS join_use_nulls = 1

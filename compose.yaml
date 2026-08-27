@@ -310,7 +310,10 @@ services:
       - ./infra/airflow/init.sh:/opt/airflow/init.sh:ro
       - airflow_logs:/opt/airflow/logs
       - airflow_auth:/opt/airflow/auth
-    mem_limit: 640m
+    # LocalExecutor запускает здесь до четырех процессов задач одновременно.
+    # 640 МиБ дали OOM, а 1 ГиБ - давление на memory.max при штатном dq_check;
+    # 1,5 ГиБ оставляет запас при AIRFLOW__CORE__PARALLELISM=4.
+    mem_limit: 1536m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8974/health >/dev/null"]
       interval: 10s
