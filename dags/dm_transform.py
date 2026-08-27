@@ -76,9 +76,10 @@ def replacements(scope: dict[str, object]) -> list[dict[str, object]]:
     start_date=START_DATE,
     is_paused_upon_creation=False,
     max_active_runs=1,
-    # Каждая задача LocalExecutor - отдельный процесс. Четыре процесса уже
-    # дали SIGKILL при лимите scheduler 640 МиБ; три - измеренный потолок DDS.
-    max_active_tasks=3,
+    # Каждая задача LocalExecutor — отдельный процесс. После появления
+    # dq_check три одновременные сборки DM получили SIGKILL при лимите
+    # scheduler 640 МиБ; две оставляют запас и сохраняют параллельность.
+    max_active_tasks=2,
     template_searchpath=str(SQL_ROOT),
     tags=["dm"],
 )

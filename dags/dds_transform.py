@@ -355,6 +355,10 @@ def dds_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dds/order_replace.sql",
             do_xcom_push=False,
+            # Замены не зависят друг от друга, но каждая — отдельный процесс
+            # LocalExecutor. Три разом получили SIGKILL при лимите scheduler
+            # 640 МиБ; последовательность не меняет деловой результат.
+            max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 
         rebuild >> replace
@@ -416,6 +420,8 @@ def dds_transform():
             conn_id=CLICKHOUSE_CONNECTION,
             sql="dds/session_replace.sql",
             do_xcom_push=False,
+            # Причина единицы разобрана у order.replace выше.
+            max_active_tis_per_dag=1,
         ).expand_kwargs(replacements(days))
 
         rebuild >> replace

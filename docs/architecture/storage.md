@@ -606,6 +606,9 @@ SQL-файлы исполняет штатный `SQLExecuteQueryOperator`. Пр
 | `dm` | `dm.purchase_vs_orders_v` | публичный договор сверки с `NULL` для отсутствующей стороны |
 | `dm` | `dm.daily_traffic_rep` / `_dist` | версии дневных счетчиков трафика |
 | `dm` | `dm.daily_traffic_v` | точные текущие счетчики трафика с `FINAL` |
+| `dm` | `dm.dq_summary_rep` / `_dist` | текущее качество дня по атомарным проверкам |
+| `dm` | `dm.dq_summary_stage_rep` / `_dist` | общий донор дневных партиций DQ-сводки |
+| `dm` | `dm.dq_summary_v` | публичная сводка качества дней |
 | `dic` | `dic.products_file` | чтец CSV-каталога, общего с генератором |
 | `dic` | `dic.products` | словарь товаров поверх подложки |
 

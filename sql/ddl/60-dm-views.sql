@@ -42,3 +42,18 @@ SELECT
     _load_id,
     _load_ts
 FROM dm.daily_traffic_dist FINAL;
+
+-- Сводка отвечает, какие атомарные договоры дня выполняются сейчас.
+-- Явный список не пропускает в публичный договор будущие физические колонки.
+CREATE VIEW IF NOT EXISTS dm.dq_summary_v ON CLUSTER clickstream_cluster
+AS
+SELECT
+    data_date,
+    check_name,
+    reference_rows,
+    actual_rows,
+    failed_rows,
+    status,
+    _load_id,
+    _load_ts
+FROM dm.dq_summary_dist;
