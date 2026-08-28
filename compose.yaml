@@ -48,10 +48,10 @@ x-kafka-target: &kafka-target
 
 x-world-starting-days: &world-starting-days "8"
 
+# Общие образы Airflow и Superset собирают службы инициализации. Причина
+# отдельного build: ADR 0001.
 x-airflow-common: &airflow-common
   image: clickstream-airflow:local
-  build:
-    context: ./infra/airflow
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__PARALLELISM: "4"
@@ -105,8 +105,6 @@ x-generator-common: &generator-common
 
 x-superset-common: &superset-common
   image: clickstream-superset:local
-  build:
-    context: ./infra/superset
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
     SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?Скопируйте .env.example в .env}
@@ -257,6 +255,8 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    build:
+      context: ./infra/airflow
     user: "0:0"
     restart: "no"
     depends_on:
@@ -340,6 +340,8 @@ services:
 
   superset-init:
     <<: *superset-common
+    build:
+      context: ./infra/superset
     restart: "no"
     healthcheck:
       disable: true
