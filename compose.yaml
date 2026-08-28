@@ -48,6 +48,8 @@ x-kafka-target: &kafka-target
 
 x-world-starting-days: &world-starting-days "8"
 
+# Общие образы Airflow и Superset собирают службы инициализации. Причина
+# отдельного build: ADR 0001.
 x-airflow-common: &airflow-common
   image: clickstream-airflow:local
   environment:
@@ -253,8 +255,6 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    # Общий образ собирает один владелец. Остальные службы зависят от init и
-    # не запускают параллельный экспорт того же тега через Buildx.
     build:
       context: ./infra/airflow
     user: "0:0"
@@ -340,7 +340,6 @@ services:
 
   superset-init:
     <<: *superset-common
-    # Superset использует тот же образ после успешной подготовки.
     build:
       context: ./infra/superset
     restart: "no"
