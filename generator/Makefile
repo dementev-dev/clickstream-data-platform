@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test docs inventory
+.PHONY: lint typecheck test demo docs inventory
 
 # --- Проверки ---
 
@@ -11,6 +11,11 @@ typecheck:
 
 test:
 	uv run pytest
+
+# --- Пример из путеводителя ---
+
+demo:
+	uv run python -m clickstream_generator.demo
 
 # --- Сборка из кода ---
 
