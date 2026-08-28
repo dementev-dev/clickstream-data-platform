@@ -176,6 +176,63 @@ def test_the_rows_go_in_the_order_of_birth(days: list[day_module.Day]):
     assert len(set(numbers)) == len(numbers)
 
 
+def test_lateness_changes_only_the_rows_present_in_a_snapshot(
+    days: list[day_module.Day],
+):
+    """Неопоздавшие строки остаются прежними байтами и в прежнем порядке."""
+    number = SHORT_WINDOW_DAY
+    window = [today.orders for today in days[: number + 1]]
+    eager = serialize.orders(
+        [
+            replace(rows, snapshot_delay=np.zeros_like(rows.snapshot_delay))
+            for rows in window
+        ],
+        number,
+    )
+    actual = serialize.orders(window, number)
+    actual_ids = {json.loads(payload)["order_id"] for payload in actual}
+    expected = [
+        payload for payload in eager if json.loads(payload)["order_id"] in actual_ids
+    ]
+
+    assert len(actual) < len(eager)
+    assert actual == expected
+
+
+def test_a_two_day_late_order_first_arrives_in_its_lived_state(
+    days: list[day_module.Day],
+):
+    """Заказ δ = 2 пропускает D и D+1 и догоняет жизнь, не меняя `created_at`."""
+    honest = days[0].orders
+    target = 0
+    delay = np.zeros_like(honest.snapshot_delay)
+    delay[target] = 2
+    cancelled_after = honest.cancelled_after.copy()
+    cancelled_after[target] = 30 * 3600
+    late = replace(
+        honest,
+        snapshot_delay=delay,
+        cancelled_after=cancelled_after,
+    )
+    order_id = late.order_id[target]
+
+    for number in (0, 1):
+        assert order_id not in {
+            json.loads(payload)["order_id"]
+            for payload in serialize.orders([late], number)
+        }
+
+    arrived = {
+        record["order_id"]: record
+        for record in map(json.loads, serialize.orders([late], 2))
+    }[order_id]
+    created_at = np.datetime_as_string(
+        late.created_at[target], unit="ms", timezone="UTC"
+    )
+    assert arrived["status"] == "cancelled"
+    assert arrived["created_at"] == created_at
+
+
 def test_the_state_is_read_at_the_boundary_of_the_day(days: list[day_module.Day]):
     """Дыхание окна: оплаченный назавтра заказ в сегодняшнем слепке `created`.
 
