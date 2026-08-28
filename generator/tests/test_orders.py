@@ -58,17 +58,33 @@ def user_id_by_order(events: day.Day) -> dict[str, int]:
     )
 
 
-def test_every_order_of_the_day_is_a_purchase_of_the_day(weekday: day.Day):
-    """Заказ — вторая проекция покупки, а не второе порождение.
+def purchase_row_by_order(
+    events: day.Day,
+) -> tuple[dict[str, NDArray[Any]], dict[str, int]]:
+    """Первая строка purchase каждого доехавшего заказа."""
+    rows = purchases_of(events)
+    index: dict[str, int] = {}
+    for row, cell in enumerate(rows["purchaseID"]):
+        index.setdefault(str(cell[0]), row)
+    return rows, index
 
-    У всякого заказа ровно одно событие `purchase`, и номер у них один:
-    сойтись двум источникам больше негде — сверка стенда соединяется
-    именно по нему.
-    """
+
+def test_every_order_of_the_day_is_a_purchase_of_the_day(weekday: day.Day):
+    """Заказ рождается до потери или дубля его событийной проекции."""
     events = purchases_of(weekday)
     numbers = [cell[0] for cell in events["purchaseID"]]
     assert len(numbers) > 100
-    assert list(weekday.orders.order_id) == numbers
+    lost = {
+        order_id
+        for order_id, outcome in zip(
+            weekday.orders.order_id, weekday.purchase_outcome, strict=True
+        )
+        if outcome == commerce.EventOutcome.LOST
+    }
+    assert set(numbers) == set(weekday.orders.order_id) - lost
+    assert len(numbers) - len(set(numbers)) == int(
+        (weekday.purchase_outcome == commerce.EventOutcome.DUPLICATED).sum()
+    )
 
 
 def dropped_line(client: list[tuple[Any, int]], order: list[tuple[Any, int]]):
@@ -88,16 +104,18 @@ def test_the_order_repeats_the_purchase_up_to_one_dropped_line(weekday: day.Day)
     """
     goods = catalog.catalog()
     price = dict(zip(goods.sku.tolist(), goods.price.tolist(), strict=True))
-    events = purchases_of(weekday)
+    events, row_by_order = purchase_row_by_order(weekday)
     money = weekday.orders
     deltas = 0
 
     for number, order in enumerate(weekday.orders.order_id):
-        assert order == events["purchaseID"][number][0]
+        if weekday.purchase_outcome[number] == commerce.EventOutcome.LOST:
+            continue
+        row = row_by_order[order]
         client = list(
             zip(
-                events["productID"][number].tolist(),
-                events["productQuantity"][number].tolist(),
+                events["productID"][row].tolist(),
+                events["productQuantity"][row].tolist(),
                 strict=True,
             )
         )
@@ -110,7 +128,7 @@ def test_the_order_repeats_the_purchase_up_to_one_dropped_line(weekday: day.Day)
         )
         # Выручка клиента и `items_total` бэкенда — одно число: в событии
         # оно дробное, у заказа целое в копейках.
-        revenue = round(events["purchaseRevenue"][number][0] * commerce.KOPECKS)
+        revenue = round(events["purchaseRevenue"][row][0] * commerce.KOPECKS)
         if mine == client:
             assert money.items_total[number] == revenue
             continue
@@ -136,15 +154,18 @@ def test_the_discount_comes_from_the_coupon_of_the_event(
 
     for today in start_world:
         money = today.orders
-        events = purchases_of(today)
-        codes = [cell[0] for cell in events["purchaseCoupon"]]
-        for number, code in enumerate(codes):
+        events, row_by_order = purchase_row_by_order(today)
+        for number, order_id in enumerate(money.order_id):
+            if today.purchase_outcome[number] == commerce.EventOutcome.LOST:
+                continue
+            row = row_by_order[order_id]
+            code = events["purchaseCoupon"][row][0]
             items_total = money.items_total[number]
             expected = items_total * percent[code] // 100 if code else 0
             assert money.discount[number] == expected, money.order_id[number]
             assert money.discount[number] < items_total
 
-            revenue = round(events["purchaseRevenue"][number][0] * commerce.KOPECKS)
+            revenue = round(events["purchaseRevenue"][row][0] * commerce.KOPECKS)
             discounted_delta += int(bool(code) and items_total != revenue)
 
     # Иначе проверка не отличила бы новую базу скидки от прежней.
@@ -255,8 +276,13 @@ def test_the_user_id_is_the_person_behind_the_cookie(weekday: day.Day):
         zip(audience.client_id.tolist(), audience.person_id.tolist(), strict=True)
     )
     events = purchases_of(weekday)
-    for number, cookie in enumerate(events["ClientID"].tolist()):
-        assert weekday.orders.user_id[number] == person[cookie]
+    by_order = user_id_by_order(weekday)
+    for order_id, cookie in zip(
+        (cell[0] for cell in events["purchaseID"]),
+        events["ClientID"].tolist(),
+        strict=True,
+    ):
+        assert by_order[order_id] == person[cookie]
     assert np.all(weekday.orders.user_id > 0)
     assert weekday.orders.user_id.max() < 2**53
 

@@ -151,11 +151,17 @@ def build_classes_vs_inventory() -> list[str]:
         raise AirflowException("classes_vs_inventory: в описи нет закрытых дней")
 
     query = (SQL_ROOT / "dq" / "classes_vs_inventory.sql").read_text(encoding="utf-8")
-    actual = {
-        (data_date, mismatch_class): count
-        for data_date, mismatch_class, count in _clickhouse_hook().get_records(query)
-        if (data_date, mismatch_class) in expected
-    }
+    # GROUP BY закономерно не возвращает группу из нуля строк.
+    actual = {key: 0 for key, count in expected.items() if count == 0}
+    actual.update(
+        {
+            (data_date, mismatch_class): count
+            for data_date, mismatch_class, count in _clickhouse_hook().get_records(
+                query
+            )
+            if (data_date, mismatch_class) in expected
+        }
+    )
     summaries = []
     for data_date in sorted({day for day, _ in expected}):
         details = []

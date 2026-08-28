@@ -53,6 +53,7 @@
 """
 
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any
 
 import numpy as np
@@ -160,6 +161,14 @@ class Purchases:
         return self.person_id.size
 
 
+class EventOutcome(IntEnum):
+    """Что случилось с маячком purchase после создания заказа."""
+
+    DELIVERED = 0
+    LOST = 1
+    DUPLICATED = 2
+
+
 @dataclass(frozen=True, slots=True)
 class _Events:
     """Строки одного вида торговых событий, готовые встать в поток.
@@ -177,9 +186,14 @@ class _Events:
     basket: NDArray[np.int64]
 
 
-# Что торговая половина отдаёт дню: поток целиком — колонки, страницы и
-# товары — и покупки дня вторым выходом.
-Woven = tuple[dict[str, NDArray[Any]], NDArray[np.uint8], NDArray[np.int64], Purchases]
+# Что торговая половина отдает дню: поток, покупки и их событийные исходы.
+Woven = tuple[
+    dict[str, NDArray[Any]],
+    NDArray[np.uint8],
+    NDArray[np.int64],
+    Purchases,
+    NDArray[np.int8],
+]
 
 # День без единой корзины: покупок в нём нет, а форма у рядов есть.
 _NO_PURCHASES = Purchases(
@@ -191,6 +205,7 @@ _NO_PURCHASES = Purchases(
     revenue=np.empty(0, dtype=np.int64),
     moment=np.empty(0, dtype="datetime64[s]"),
 )
+_NO_EVENT_OUTCOMES = np.empty(0, dtype=np.int8)
 
 
 def weave(
@@ -200,6 +215,7 @@ def weave(
     page: NDArray[np.uint8],
     product: NDArray[np.int64],
     person: NDArray[np.uint64],
+    assigned_order: NDArray[np.bool_],
 ) -> Woven:
     """Вплетает торговые события в поток и отдаёт поток и покупки дня.
 
@@ -207,14 +223,14 @@ def weave(
     события встают между ними, и поток пересобирается одним порядком. Второй
     выход — покупки дня: то же самое, чем они уехали в события.
 
-    `person` — человек за кукой каждой строки, выровненный по входящему
-    потоку: личность приходит от плана состава, а не выводится из трекера
-    (docs/architecture/orders/identity.md).
+    `person` и `assigned_order` выровнены по входящему потоку. Оба
+    признака приходят из плана состава: личность дает заказу `user_id`,
+    а назначение защищает мост склейки от потери purchase.
     """
     rng = day_stream(seed, day, Component.COMMERCE)
     baskets = _baskets(rng, page, product, columns["VisitID"])
     if not len(baskets):
-        return columns, page, product, _NO_PURCHASES
+        return columns, page, product, _NO_PURCHASES, _NO_EVENT_OUTCOMES
 
     goods = catalog.catalog()
     draws = _draws(rng, baskets)
@@ -225,8 +241,13 @@ def weave(
         _order_events(columns, baskets, goods, draws, revenue, coupons),
     )
     columns, page, product, basket = _stream(rng, columns, page, product, events)
-    purchases = _purchases(columns, basket, baskets, draws, revenue, coupons, person)
-    return columns, page, product, purchases
+    purchases, assigned = _purchases(
+        columns, basket, baskets, draws, revenue, coupons, person, assigned_order
+    )
+    columns, page, product, event_outcome = _corrupt_events(
+        seed, day, columns, page, product, purchases, assigned
+    )
+    return columns, page, product, purchases, event_outcome
 
 
 def _draws(rng: np.random.Generator, baskets: _Baskets) -> _Draws:
@@ -653,7 +674,8 @@ def _purchases(
     revenue: NDArray[np.int64],
     coupons: NDArray[np.object_],
     person: NDArray[np.uint64],
-) -> Purchases:
+    assigned_order: NDArray[np.bool_],
+) -> tuple[Purchases, NDArray[np.bool_]]:
     """Покупки дня — то же, чем они уехали в события, только структурой.
 
     Порядок здесь — порядок строк потока, он же порядок номеров заказа:
@@ -664,7 +686,7 @@ def _purchases(
     here = np.flatnonzero(rows["EventType"] == PURCHASE)
     mine = basket[here]
     bought = [baskets.positions_of(number, draws.kept) for number in mine.tolist()]
-    return Purchases(
+    purchases = Purchases(
         order_id=tuple(rows["purchaseID"][row][0] for row in here.tolist()),
         person_id=person[baskets.confirmation[mine]],
         product=tuple(baskets.product[group] for group in bought),
@@ -673,6 +695,118 @@ def _purchases(
         revenue=revenue[mine],
         moment=rows["UTCEventTime"][here],
     )
+    return purchases, assigned_order[baskets.confirmation[mine]]
+
+
+def _corrupt_events(
+    seed: int,
+    day: int,
+    rows: dict[str, NDArray[Any]],
+    page: NDArray[np.uint8],
+    product: NDArray[np.int64],
+    purchases: Purchases,
+    assigned: NDArray[np.bool_],
+) -> tuple[
+    dict[str, NDArray[Any]], NDArray[np.uint8], NDArray[np.int64], NDArray[np.int8]
+]:
+    """Теряет purchase или повторяет пару подтверждения.
+
+    Заказы уже собраны, а номера покупок уже вписаны в строки. Поэтому
+    порча меняет только событийную сторону. Все броски делаются на полную
+    длину покупок дня, чтобы отбор одного класса не сдвигал другой.
+    """
+    count = len(purchases)
+    if not count:
+        return rows, page, product, _NO_EVENT_OUTCOMES
+
+    rng = day_stream(seed, day, Component.BEACONS)
+    lost = (rng.integers(0, 100, count) < world.LOST_PURCHASE_PERCENT) & ~assigned
+    duplicate_draw = rng.integers(0, 100, count) < world.DUPLICATE_PURCHASE_PERCENT
+    delay = rng.integers(*world.DUPLICATE_DELAY_SECONDS, count)
+    watch = ids.unique_apart_from(rng, 2 * count, rows["WatchID"]).reshape(count, 2)
+
+    purchase_rows = np.flatnonzero(rows["EventType"] == PURCHASE)
+    confirmation_rows = _confirmation_rows(rows, page, purchase_rows)
+    eligible = _duplicate_eligibility(rows, purchase_rows, delay)
+    duplicated = ~lost & duplicate_draw & eligible
+
+    outcome = np.full(count, EventOutcome.DELIVERED, dtype=np.int8)
+    outcome[lost] = EventOutcome.LOST
+    outcome[duplicated] = EventOutcome.DUPLICATED
+
+    keep = np.ones(page.size, dtype=bool)
+    keep[purchase_rows[lost]] = False
+    sources = np.column_stack(
+        (confirmation_rows[duplicated], purchase_rows[duplicated])
+    )
+    selected = np.flatnonzero(duplicated)
+    if selected.size:
+        copies = sources.ravel()
+        shifted = np.repeat(delay[selected], 2).astype("timedelta64[s]")
+        additions = {name: values[copies] for name, values in rows.items()}
+        additions["UTCEventTime"] = additions["UTCEventTime"] + shifted
+        additions["WatchID"] = watch[selected].ravel()
+        # Первая строка пары — обновление confirmation: ее предыдущая
+        # страница — она же, а не checkout из первого просмотра.
+        additions["Referer"] = additions["URL"].copy()
+        rows = {
+            name: np.concatenate((values[keep], additions[name]))
+            for name, values in rows.items()
+        }
+        page = np.concatenate((page[keep], page[copies]))
+        product = np.concatenate((product[keep], product[copies]))
+    else:
+        rows = {name: values[keep] for name, values in rows.items()}
+        page = page[keep]
+        product = product[keep]
+
+    order = np.lexsort((rows["WatchID"], rows["UTCEventTime"]))
+    return (
+        {name: values[order] for name, values in rows.items()},
+        page[order],
+        product[order],
+        outcome,
+    )
+
+
+def _confirmation_rows(
+    rows: dict[str, NDArray[Any]],
+    page: NDArray[np.uint8],
+    purchase_rows: NDArray[np.int64],
+) -> NDArray[np.int64]:
+    """Находит просмотр, с которым purchase образует пару."""
+    confirmation = (rows["EventType"] == "pageview") & (page == Page.CONFIRMATION)
+    by_visit = {
+        int(rows["VisitID"][row]): row for row in np.flatnonzero(confirmation).tolist()
+    }
+    return np.array(
+        [by_visit[int(rows["VisitID"][row])] for row in purchase_rows.tolist()],
+        dtype=np.int64,
+    )
+
+
+def _duplicate_eligibility(
+    rows: dict[str, NDArray[Any]],
+    purchase_rows: NDArray[np.int64],
+    delay: NDArray[np.int64],
+) -> NDArray[np.bool_]:
+    """Проверяет полночь и запас до следующего визита куки."""
+    moment = rows["UTCEventTime"][purchase_rows]
+    shifted = moment + delay.astype("timedelta64[s]")
+    before_midnight = shifted < _midnight(rows) + np.timedelta64(1, "D")
+    eligible = before_midnight.copy()
+    for number, row in enumerate(purchase_rows.tolist()):
+        later_visit = (
+            (rows["ClientID"] == rows["ClientID"][row])
+            & (rows["VisitID"] != rows["VisitID"][row])
+            & (rows["UTCEventTime"] > moment[number])
+        )
+        if np.any(later_visit):
+            next_start = rows["UTCEventTime"][later_visit].min()
+            eligible[number] &= next_start - moment[number] > np.timedelta64(
+                world.VISIT_TIMEOUT_SECONDS + int(delay[number]), "s"
+            )
+    return eligible
 
 
 def _midnight(columns: dict[str, NDArray[Any]]) -> np.datetime64:

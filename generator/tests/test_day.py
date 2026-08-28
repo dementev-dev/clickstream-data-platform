@@ -88,6 +88,7 @@ def snapshot(events: day.Day) -> dict[str, Any]:
         "page": events.page.tolist(),
         "product": events.product.tolist(),
         "orders": orders(events),
+        "purchase_outcome": events.purchase_outcome.tolist(),
     }
 
 
@@ -115,6 +116,7 @@ def test_the_snapshot_notices_everything_the_day_hands_out(weekday: day.Day):
         page=weekday.page,
         product=weekday.product,
         orders=weekday.orders,
+        purchase_outcome=weekday.purchase_outcome,
     )
     assert snapshot(reordered) != original
 

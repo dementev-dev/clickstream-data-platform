@@ -128,7 +128,9 @@ def test_the_record_matches_the_wire_contract(days: list[day_module.Day]):
         )
 
         if _born(record) == _date(SHORT_WINDOW_DAY):
-            assert record["created_at"][:19] + "Z" == bought[record["order_id"]]
+            # Потерянного purchase в трекере нет, но заказ остается.
+            if record["order_id"] in bought:
+                assert record["created_at"][:19] + "Z" == bought[record["order_id"]]
 
 
 def test_negative_money_does_not_leave_the_source(days: list[day_module.Day]):
@@ -325,7 +327,10 @@ def _purchase_times(today: day_module.Day) -> dict[str, str]:
     times = np.datetime_as_string(
         today.columns["UTCEventTime"][here], unit="s", timezone="UTC"
     )
-    return dict(zip(numbers, times.tolist(), strict=True))
+    result: dict[str, str] = {}
+    for number, moment in zip(numbers, times.tolist(), strict=True):
+        result.setdefault(number, moment)
+    return result
 
 
 def _born(record: dict) -> date:

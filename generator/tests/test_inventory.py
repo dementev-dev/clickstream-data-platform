@@ -48,7 +48,15 @@ def test_order_class_counters_cover_only_closed_days(inventory: dict):
     rows = [row for row in inventory["days"] if "orders" in row]
 
     assert [row["day"] for row in rows] == [0]
-    assert set(rows[0]["orders"]) == {"match", "cancelled", "amount_delta"}
+    assert set(rows[0]["orders"]) == {
+        "match",
+        "cancelled",
+        "lost_event",
+        "duplicate_event",
+        "amount_delta",
+    }
+    assert rows[0]["orders"]["lost_event"] > 0
+    assert rows[0]["orders"]["duplicate_event"] > 0
     today = day_module.stream(CANONICAL_SEED, rows[0]["day"])
     assert sum(rows[0]["orders"].values()) == len(today.orders)
 

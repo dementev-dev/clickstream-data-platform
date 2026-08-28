@@ -111,7 +111,7 @@
 
 Зерно — заказ. Покупки из `dds.event_v` сначала сворачиваются по
 `purchase_id[1]`: контракт источника обещает один номер и одну объявленную
-сумму, а отдельный счет событий оставляет будущий класс `duplicate_event`
+сумму, а отдельный счет событий оставляет класс `duplicate_event`
 наблюдаемым. Заказы приходят из `dds.order_v`. Обе стороны записаны
 подзапросами, затем соединены `FULL OUTER GLOBAL JOIN`: голая левая
 Distributed-таблица вернула бы каждый непарный заказ по разу с каждого шарда
@@ -176,8 +176,8 @@ Distributed-таблица вернула бы каждый непарный з�
   `dds.session_v`;
 - `classes_vs_inventory`: ключ — `mismatch_class`, эталон — счётчик из
   `orders` в описи мира, объект — число заказов класса в
-  `dm.purchase_vs_orders_v`. Проверяются `match`, `cancelled` и
-  `amount_delta` только для покрытых описью закрытых дней;
+  `dm.purchase_vs_orders_v`. Проверяются `match`, `cancelled`, `lost_event`,
+  `duplicate_event` и `amount_delta` только для покрытых описью закрытых дней;
 - `revenue_daily_vs_dds`: ключ — `product_category` внутри дня. Сравниваются
   `orders`, `units`, `revenue` и `aov` с прямым агрегатом `dds.order_v`;
 - `purchase_vs_orders_vs_dds`: ключ — `order_id` внутри дня. Все деловые

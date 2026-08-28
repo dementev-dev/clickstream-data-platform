@@ -100,6 +100,8 @@ class Day:
     page: NDArray[np.uint8]
     product: NDArray[np.int64]
     orders: orders.Orders
+    # Событийный исход каждого заказа, в том же порядке.
+    purchase_outcome: NDArray[np.int8]
 
     def __len__(self) -> int:
         return self.page.size
@@ -162,13 +164,15 @@ def stream(seed: int, day: int) -> Day:
     # целиком: в нём же они и упорядочиваются. Вторым выходом приходят
     # покупки дня — из них заказная сторона собирает заказы.
     person = np.repeat(audience.person_id[visits.cookie], visits.pages)
-    columns, page, product, purchases = commerce.weave(
+    assigned_order = np.repeat(visits.ordering, visits.pages)
+    columns, page, product, purchases, purchase_outcome = commerce.weave(
         seed,
         day,
         {name: value[order] for name, value in columns.items()},
         page[alive][order],
         product[alive][order],
         person[alive][order],
+        assigned_order[alive][order],
     )
     return Day(
         day=day,
@@ -176,6 +180,7 @@ def stream(seed: int, day: int) -> Day:
         page=page,
         product=product,
         orders=orders.of_day(seed, day, purchases),
+        purchase_outcome=purchase_outcome,
     )
 
 
