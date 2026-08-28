@@ -237,35 +237,42 @@ check_airflow_probes() {
 }
 
 check_superset() {
-    local clickhouse_password
+    local access_token
+    local available_schemas
+    local clickhouse_databases
     local config
+    local connection_count
+    local connection_details
+    local connection_id
+    local database_list
     local login
     local metadata_tables
     local password
     local port
-    local metadata_engine
-    local stored_config
-    local stored_uri
+    local schemas
+    local stored_safe_uri
     local stored_uuid
     local superset_password
     local superset_user
+    local superset_url
     local user
 
     config="$(compose config --format json 2>/dev/null || true)"
     user="$(jq -r '.services.superset.environment.SUPERSET_ADMIN_USER // empty' <<<"$config")"
     password="$(jq -r '.services.superset.environment.SUPERSET_ADMIN_PASSWORD // empty' <<<"$config")"
-    clickhouse_password="$(jq -r '.services.superset.environment.CLICKHOUSE_BI_PASSWORD // empty' <<<"$config")"
     superset_user="$(jq -r '.services["postgres-metadata"].environment.SUPERSET_METADATA_USER // empty' <<<"$config")"
     superset_password="$(jq -r '.services["postgres-metadata"].environment.SUPERSET_METADATA_PASSWORD // empty' <<<"$config")"
     port="$(published_port superset 8088)"
+    superset_url="http://127.0.0.1:${port}"
 
     login="$(curl -sf --max-time 10 -X POST \
         -H 'Content-Type: application/json' \
         -d "$(jq -cn --arg username "$user" --arg password "$password" \
             '{username: $username, password: $password, provider: "db", refresh: true}')" \
-        "http://127.0.0.1:${port}/api/v1/security/login" 2>/dev/null || true)"
-    if curl -sf --max-time 10 "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && \
-        jq -e '.access_token | length > 0' >/dev/null 2>&1 <<<"$login"; then
+        "${superset_url}/api/v1/security/login" 2>/dev/null || true)"
+    access_token="$(jq -r '.access_token // empty' <<<"$login")"
+    if curl -sf --max-time 10 "${superset_url}/health" >/dev/null 2>&1 && \
+        [[ -n "$access_token" ]]; then
         pass 'интерфейс Superset отвечает и принимает подготовленные учётные данные администратора'
     else
         fail 'интерфейс Superset не отвечает или не принимает учётные данные администратора'
@@ -276,28 +283,49 @@ check_superset() {
         psql -U "$superset_user" -d superset -tAc \
         "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ab_user';" \
         2>/dev/null || true)"
-    stored_config="$(timeout 30s "${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" \
-        exec -T superset python -c \
-        "from superset.app import create_app; app = create_app(); app.app_context().push(); from superset.extensions import db; from superset.models.core import Database; url = db.engine.url; database = db.session.query(Database).filter_by(database_name='ClickHouse').one(); print('SMOKE_METADATA=' + '|'.join([url.get_backend_name(), url.username or '', url.host or '', str(url.port or ''), url.database or ''])); print('SMOKE_UUID=' + str(database.uuid)); print('SMOKE_URI=' + database.sqlalchemy_uri_decrypted)" \
-        2>/dev/null)"
-    metadata_engine="$(sed -n 's/^SMOKE_METADATA=//p' <<<"$stored_config" | tail -n 1)"
-    stored_uuid="$(sed -n 's/^SMOKE_UUID=//p' <<<"$stored_config" | tail -n 1)"
-    stored_uri="$(sed -n 's/^SMOKE_URI=//p' <<<"$stored_config" | tail -n 1)"
+
+    # Superset уже собрал приложение. Его REST API читает ту же сохранённую
+    # модель Database без второго тяжёлого запуска Python.
+    database_list="$(curl -sf --max-time 10 \
+        -H "Authorization: Bearer ${access_token}" \
+        "${superset_url}/api/v1/database/" 2>/dev/null || true)"
+    clickhouse_databases="$(jq -c \
+        '[.result[]? | select(.database_name == "ClickHouse")]' \
+        <<<"$database_list")"
+    connection_count="$(jq -r 'length' <<<"$clickhouse_databases")"
+    connection_id="$(jq -r 'if length == 1 then .[0].id else empty end' \
+        <<<"$clickhouse_databases")"
+    stored_uuid="$(jq -r 'if length == 1 then .[0].uuid else empty end' \
+        <<<"$clickhouse_databases")"
+
+    connection_details=''
+    if [[ -n "$connection_id" ]]; then
+        connection_details="$(curl -sf --max-time 10 \
+            -H "Authorization: Bearer ${access_token}" \
+            "${superset_url}/api/v1/database/${connection_id}/connection" \
+            2>/dev/null || true)"
+    fi
+    stored_safe_uri="$(jq -r '.result.sqlalchemy_uri // empty' \
+        <<<"$connection_details")"
+
     if [[ "$metadata_tables" == '1' ]] && \
-        [[ "$metadata_engine" == "postgresql|${superset_user}|postgres-metadata|5432|superset" ]] && \
         [[ "$stored_uuid" == '4b8f2c6e-1d3a-4f5b-9c7d-2e8a1f0b3c5d' ]] && \
-        [[ "$stored_uri" == "clickhousedb://bi:${clickhouse_password}@clickhouse-02:8123/default" ]]; then
-        pass 'метаданные Superset живут в Postgres, подготовленное подключение указывает на clickhouse-02'
+        [[ "$stored_safe_uri" == 'clickhousedb://bi@clickhouse-02:8123/default' ]]; then
+        pass 'Postgres для метаданных Superset подготовлен, подключение указывает на clickhouse-02'
     else
-        fail "Superset не подтвердил Postgres и подготовленное подключение bi к ноде 2: таблицы=${metadata_tables:-нет}, движок=${metadata_engine:-нет}, UUID=${stored_uuid:-нет}"
+        fail "Postgres или подключение Superset не подготовлены: таблицы=${metadata_tables:-нет}, подключений=${connection_count:-нет}, UUID=${stored_uuid:-нет}, URI=${stored_safe_uri:-нет}"
         return
     fi
 
-    if printf 'n\n' | timeout 60s "${COMPOSE_CMD[@]}" --project-directory "$ROOT_DIR" \
-        exec -T superset superset test-db "$stored_uri" >/dev/null 2>&1; then
-        pass 'Superset успешно проверил извлечённое из метаданных подключение ClickHouse'
+    schemas="$(curl -sf --max-time 10 \
+        -H "Authorization: Bearer ${access_token}" \
+        "${superset_url}/api/v1/database/${connection_id}/schemas/" \
+        2>/dev/null || true)"
+    available_schemas="$(jq -r '[.result[]?] | join(", ")' <<<"$schemas")"
+    if jq -e '.result | index("dm") != null' >/dev/null 2>&1 <<<"$schemas"; then
+        pass 'сохранённое подключение Superset видит схему витрин dm'
     else
-        fail 'Superset не смог проверить извлечённое из метаданных подключение ClickHouse'
+        fail "сохранённое подключение Superset не видит схему витрин dm: схемы=${available_schemas:-нет}"
     fi
 }
 
