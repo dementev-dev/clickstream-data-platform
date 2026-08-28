@@ -122,6 +122,11 @@ def test_the_trade_event_never_overtakes_the_next_page():
     assert max(world.TRADE_DELAY_SECONDS) <= min(world.PAGE_PAUSE_SECONDS)
 
 
+def test_the_duplicate_delay_stays_inside_a_visit_timeout():
+    assert 0 < min(world.DUPLICATE_DELAY_SECONDS)
+    assert max(world.DUPLICATE_DELAY_SECONDS) <= world.VISIT_TIMEOUT_SECONDS
+
+
 def conversion(cart: int, checkout_of_cart: int) -> float:
     """Конверсия визита в заказ, проценты: произведение трёх шагов воронки."""
     return cart * checkout_of_cart * world.CONFIRMATION_OF_CHECKOUT_PERCENT / 100**2

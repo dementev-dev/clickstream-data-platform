@@ -133,15 +133,15 @@ def opened_cards(events: day.Day) -> set[tuple[int, int]]:
     )
 
 
-def test_a_confirmation_in_the_stream_always_has_its_purchase(weekday: day.Day):
-    """Клиентская сторона честная: подтверждение без покупки — это потеря.
-
-    Потери и дубли стенд заводит намеренно и позже (этапы 4 и 6); здесь их
-    быть не должно ни одной. Обратное тоже верно: покупка без подтверждения
-    в потоке — заказ ниоткуда.
-    """
+def test_only_a_lost_purchase_leaves_a_confirmation_without_purchase(
+    weekday: day.Day,
+):
+    """Потеря выбрасывает purchase, но оставляет просмотр confirmation."""
     bought = set(rows_of(weekday, commerce.PURCHASE)["VisitID"].tolist())
-    assert confirmed_visits(weekday) == bought
+    missing = confirmed_visits(weekday) - bought
+    lost = int((weekday.purchase_outcome == commerce.EventOutcome.LOST).sum())
+    assert len(missing) == lost > 0
+    assert bought <= confirmed_visits(weekday)
 
 
 def test_the_day_boundary_takes_the_confirmation_together_with_its_purchase(
@@ -159,7 +159,10 @@ def test_the_day_boundary_takes_the_confirmation_together_with_its_purchase(
     events = day.stream(CANONICAL_SEED, WEEKDAY)
     bought = set(rows_of(events, commerce.PURCHASE)["VisitID"].tolist())
     assert bought
-    assert confirmed_visits(events) == bought
+    missing = confirmed_visits(events) - bought
+    lost = int((events.purchase_outcome == commerce.EventOutcome.LOST).sum())
+    assert len(missing) == lost
+    assert bought <= confirmed_visits(events)
 
 
 def test_a_purchase_carries_exactly_one_order_number(weekday: day.Day):
@@ -525,13 +528,15 @@ def test_the_goals_repeat_the_trade_events(weekday: day.Day):
 
 def test_the_order_number_reads_as_the_day_and_the_count(weekday: day.Day):
     """Номер — день и порядковый номер покупки в нём; он же `order_id` бэкенда."""
-    orders = rows_of(weekday, commerce.PURCHASE)
-    numbers = [cell[0] for cell in orders["purchaseID"]]
+    events = rows_of(weekday, commerce.PURCHASE)
+    numbers = [cell[0] for cell in events["purchaseID"]]
     date = str(weekday.columns["EventDate"][0]).replace("-", "")
-    assert numbers == [f"{date}-{place:04d}" for place in range(1, len(numbers) + 1)]
-    assert len(set(numbers)) == len(numbers)
-    # Нумерация идёт в порядке событий: строки дня уже упорядочены по времени.
-    assert list(orders["UTCEventTime"]) == sorted(orders["UTCEventTime"])
+    expected = [f"{date}-{place:04d}" for place in range(1, len(weekday.orders) + 1)]
+    # Порча идет после нумерации: потеря оставляет дыру, а дубль
+    # повторяет готовый номер и не двигает соседей.
+    assert list(weekday.orders.order_id) == expected
+    assert set(numbers) <= set(expected)
+    assert list(events["UTCEventTime"]) == sorted(events["UTCEventTime"])
 
 
 def test_the_coupon_comes_from_the_world_table_and_does_not_touch_the_revenue(
@@ -599,7 +604,23 @@ def test_the_trade_flow_draws_from_its_own_named_branch(
 
     monkeypatch.setattr(commerce, "day_stream", spy)
     day.stream(CANONICAL_SEED, WEEKDAY)
-    assert asked == [(CANONICAL_SEED, WEEKDAY, Component.COMMERCE)]
+    assert asked == [
+        (CANONICAL_SEED, WEEKDAY, Component.COMMERCE),
+        (CANONICAL_SEED, WEEKDAY, Component.BEACONS),
+    ]
+
+
+def test_an_assigned_purchase_is_never_lost(monkeypatch: pytest.MonkeyPatch):
+    """Гарантия плана сильнее порчи: мост склейки не теряется."""
+    monkeypatch.setattr(world, "LOST_PURCHASE_PERCENT", 100)
+    monkeypatch.setattr(world, "DUPLICATE_PURCHASE_PERCENT", 0)
+    events = day.stream(CANONICAL_SEED, WEEKDAY)
+    audience = plan.audience(CANONICAL_SEED, WEEKDAY)
+
+    promised = set(audience.client_id[audience.assigned_order].tolist())
+    bought = set(rows_of(events, commerce.PURCHASE)["ClientID"].tolist())
+    assert promised
+    assert bought == promised
 
 
 def test_the_promised_orders_of_a_pair_become_purchases(week: list[day.Day]):
@@ -627,6 +648,78 @@ def test_the_promised_orders_of_a_pair_become_purchases(week: list[day.Day]):
     assert pairs == plan.counters(CANONICAL_SEED, WEEK).pairs
 
 
+def test_a_duplicate_repeats_the_confirmation_story(weekday: day.Day):
+    """Обновление повторяет просмотр и purchase в том же визите."""
+    purchases = rows_of(weekday, commerce.PURCHASE)
+    ids_by_order: dict[str, list[int]] = {}
+    for row, cell in enumerate(purchases["purchaseID"]):
+        ids_by_order.setdefault(str(cell[0]), []).append(row)
+    duplicated = [rows for rows in ids_by_order.values() if len(rows) == 2]
+
+    expected = int((weekday.purchase_outcome == commerce.EventOutcome.DUPLICATED).sum())
+    assert len(duplicated) == expected > 0
+    for pair in duplicated:
+        first, second = sorted(pair, key=lambda row: purchases["UTCEventTime"][row])
+        delay = (
+            (purchases["UTCEventTime"][second] - purchases["UTCEventTime"][first])
+            .astype("timedelta64[s]")
+            .astype(int)
+        )
+        assert world.DUPLICATE_DELAY_SECONDS[0] <= delay
+        assert delay < world.DUPLICATE_DELAY_SECONDS[1]
+        assert delay < world.VISIT_TIMEOUT_SECONDS
+        assert purchases["VisitID"][first] == purchases["VisitID"][second]
+        assert purchases["WatchID"][first] != purchases["WatchID"][second]
+        for name in (
+            "purchaseID",
+            "purchaseRevenue",
+            "productID",
+            "productQuantity",
+            "ecommerce",
+        ):
+            left, right = purchases[name][first], purchases[name][second]
+            if isinstance(left, np.ndarray):
+                assert np.array_equal(left, right), name
+            else:
+                assert left == right, name
+
+        visit = purchases["VisitID"][first]
+        confirmation = (
+            (weekday.columns["EventType"] == "pageview")
+            & (weekday.page == Page.CONFIRMATION)
+            & (weekday.columns["VisitID"] == visit)
+        )
+        views = np.flatnonzero(confirmation)
+        assert views.size == 2
+        assert len(set(weekday.columns["WatchID"][views].tolist())) == 2
+        view_delay = (
+            (
+                weekday.columns["UTCEventTime"][views].max()
+                - weekday.columns["UTCEventTime"][views].min()
+            )
+            .astype("timedelta64[s]")
+            .astype(int)
+        )
+        assert view_delay == delay
+
+        cookie = purchases["ClientID"][first]
+        later_visit = (
+            (weekday.columns["ClientID"] == cookie)
+            & (weekday.columns["VisitID"] != visit)
+            & (weekday.columns["UTCEventTime"] > purchases["UTCEventTime"][second])
+        )
+        if np.any(later_visit):
+            gap = (
+                (
+                    weekday.columns["UTCEventTime"][later_visit].min()
+                    - purchases["UTCEventTime"][second]
+                )
+                .astype("timedelta64[s]")
+                .astype(int)
+            )
+            assert gap > world.VISIT_TIMEOUT_SECONDS
+
+
 def paired_cookies() -> set[int]:
     """Куки двухкуковых пар: их заказы обещаны планом, а не решены днём."""
     cookies: set[int] = set()
@@ -642,21 +735,26 @@ def test_flagged_buyers_buy_again_much_more_often(week: list[day.Day]):
     «Постоянный покупатель» читается только так — как кука, которая ходит
     неделями и покупает не раз: метки в событии нет и не будет.
 
-    Куки двухкуковых пар из счёта исключены: их заказы назначил план, и
-    вместе с ними лифт мерил бы гарантию, а не два новых рычага. Остаются
-    те помеченные, чьи покупки решил день: повторно покупают 4,6% из них
-    против 1,5% прочих — втрое чаще при пороге «вдвое».
+    Куки двухкуковых пар из счета исключены: их заказы назначил план, и
+    вместе с ними лифт мерил бы гарантию, а не два новых рычага. Даже после
+    событийной порчи оставшиеся помеченные покупают повторно более чем вдвое
+    чаще прочих.
     """
-    purchases: dict[int, int] = {}
+    purchases: dict[int, set[str]] = {}
     flagged: set[int] = set()
     for number, events in enumerate(week):
         audience = plan.audience(CANONICAL_SEED, number)
         flagged |= set(audience.client_id[audience.buyer].tolist())
-        for cookie in rows_of(events, commerce.PURCHASE)["ClientID"].tolist():
-            purchases[cookie] = purchases.get(cookie, 0) + 1
+        rows = rows_of(events, commerce.PURCHASE)
+        for cookie, order_id in zip(
+            rows["ClientID"].tolist(),
+            (str(cell[0]) for cell in rows["purchaseID"]),
+            strict=True,
+        ):
+            purchases.setdefault(cookie, set()).add(order_id)
 
     def repeat_share(cookies: set[int]) -> float:
-        again = sum(1 for cookie in cookies if purchases[cookie] > 1)
+        again = sum(1 for cookie in cookies if len(purchases[cookie]) > 1)
         return again / len(cookies)
 
     buyers = set(purchases)

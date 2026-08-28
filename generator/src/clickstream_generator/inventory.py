@@ -119,17 +119,38 @@ def _snapshot(number: int, orders: list[orders_module.Orders]) -> dict[str, Any]
 
 
 def _order_class_counts(today: day_module.Day) -> dict[str, int]:
-    """Заказы дня по итоговому классу: отмена перевешивает дельту суммы."""
+    """Заказы дня по итоговому классу по приоритету спеки."""
     purchase = today.columns["EventType"] == commerce.PURCHASE
-    declared = today.columns["purchaseRevenue"][purchase]
-    counts = {"match": 0, "cancelled": 0, "amount_delta": 0}
+    declared = {
+        purchase_id[0]: round(revenue[0] * commerce.KOPECKS)
+        for purchase_id, revenue in zip(
+            today.columns["purchaseID"][purchase],
+            today.columns["purchaseRevenue"][purchase],
+            strict=True,
+        )
+    }
+    counts = {
+        "match": 0,
+        "cancelled": 0,
+        "lost_event": 0,
+        "duplicate_event": 0,
+        "amount_delta": 0,
+    }
 
-    for outcome, items_total, revenue in zip(
-        today.orders.outcome, today.orders.items_total, declared, strict=True
+    for order_id, order_outcome, event_outcome, items_total in zip(
+        today.orders.order_id,
+        today.orders.outcome,
+        today.purchase_outcome,
+        today.orders.items_total,
+        strict=True,
     ):
-        if outcome != orders_module.OrderOutcome.PAID:
+        if order_outcome != orders_module.OrderOutcome.PAID:
             counts["cancelled"] += 1
-        elif items_total != round(revenue[0] * commerce.KOPECKS):
+        elif event_outcome == commerce.EventOutcome.LOST:
+            counts["lost_event"] += 1
+        elif event_outcome == commerce.EventOutcome.DUPLICATED:
+            counts["duplicate_event"] += 1
+        elif items_total != declared[order_id]:
             counts["amount_delta"] += 1
         else:
             counts["match"] += 1

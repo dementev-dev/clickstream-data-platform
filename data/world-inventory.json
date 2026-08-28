@@ -6,55 +6,57 @@
     {
       "day": 0,
       "date": "2026-06-01",
-      "events": 50626,
-      "sha256": "81ad7f402bdd4c8b56425f6439a024b9996e5ca95dd207d444290d20a70ed407",
+      "events": 50628,
+      "sha256": "d09704ed99e45824e451e2f6bbbbd5c547df382f7a582699955010f3807eb0ee",
       "orders": {
-        "match": 197,
+        "match": 192,
         "cancelled": 20,
+        "lost_event": 3,
+        "duplicate_event": 2,
         "amount_delta": 6
       }
     },
     {
       "day": 1,
       "date": "2026-06-02",
-      "events": 49722,
-      "sha256": "5f7aa0301832008db612eff05899b1210af958c888ac2e9e89f4b7a552569eff"
+      "events": 49727,
+      "sha256": "8005d2934eb353478e35331d7ae7ae6876c7934b2d9032fde92cf6ce86d6460f"
     },
     {
       "day": 2,
       "date": "2026-06-03",
-      "events": 52361,
-      "sha256": "10ac9ce65ca6dc171689edf78ef5cd785e8c8a80e54d236bf2b9d6dbf6997070"
+      "events": 52363,
+      "sha256": "e13f6f3f3977386a94d0e63b6849675cb5d2486a277d559fd415923cfc82e53a"
     },
     {
       "day": 3,
       "date": "2026-06-04",
-      "events": 53157,
-      "sha256": "7bf4deadd8f69a6c479fceabfe2d1e8ea8db76919b10a8b9e780006708da31c3"
+      "events": 53159,
+      "sha256": "91c713add62222adc3f89c04e6cc087d8c44e2385d14d0464e2c016b6952b9fd"
     },
     {
       "day": 4,
       "date": "2026-06-05",
-      "events": 50078,
-      "sha256": "b9e758fb72f937aa5ad1f2e90dee5ec147b16cfd89e49e51a00582f909458c29"
+      "events": 50087,
+      "sha256": "b7fc27d73fc157a48bece0189c7983f6bc672f052e0703cd799b9774da4b904e"
     },
     {
       "day": 5,
       "date": "2026-06-06",
-      "events": 47164,
-      "sha256": "f08a9f9a439f1da9e4ad8d94b9f65b7f3329256e41446d22d900cc4825f2480c"
+      "events": 47169,
+      "sha256": "82cb8017d53d6dee8438d3683b7a901f1ace139f3b8ae836215722bb580fe207"
     },
     {
       "day": 6,
       "date": "2026-06-07",
-      "events": 48683,
-      "sha256": "7e45d9dd59c902067fa6847d813669b1ab9a4ee88d2f192382577a5ed8d590a7"
+      "events": 48686,
+      "sha256": "b50ad0fcc7d1ea0c637cfcba98e5c2b55d65215cffa3693bc77edeaa83e6c783"
     },
     {
       "day": 7,
       "date": "2026-06-08",
       "events": 49394,
-      "sha256": "286ccc2451847ac8de215b5e902c328371021ad5502bd4afca0494b6f313aef7"
+      "sha256": "358d51b36221d822960237702fa6327fb663a57cf49cc4415a859b16e5aa05a2"
     }
   ],
   "snapshots": [
