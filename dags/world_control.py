@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import os
 
 from airflow.exceptions import AirflowException
@@ -141,7 +142,19 @@ def _ingest_orders() -> TriggerDagRunOperator:
     tags=TAGS,
     params={
         "days": Param(
-            1, type="integer", minimum=1, maximum=7, title="Сколько дней прожить"
+            1,
+            type="integer",
+            minimum=1,
+            maximum=7,
+            title="Сколько дней прожить",
+            # description_md рендерится подсказкой прямо в форме запуска
+            # (params.rst, Airflow 3.3) — объяснение стоит там, где путают.
+            description_md=(
+                "Какие именно дни — решает не форма: первый несыгранный "
+                "день хранит переменная `world_position` (Admin → "
+                "Variables). Служебные поля Airflow — Logical date, Run "
+                "ID — к оси мира отношения не имеют."
+            ),
         )
     },
 )
@@ -149,14 +162,20 @@ def world_next_day():
     """Прожить следующие дни пачкой, без пауз.
 
     Запускается руками. День по умолчанию один, но разгон вперёд идёт одним
-    нажимом, а не десятью: сколько дней играть — параметр запуска.
+    нажимом, а не десятью: сколько дней играть — параметр запуска. Какие
+    именно дни, знает переменная `world_position`, а не форма: логическая
+    дата прогона к оси мира отношения не имеет.
     """
 
     @task
     def remember_played(first_day: int) -> None:
         """Позиция ставится по сыгранным дням и только по успеху."""
         days = get_current_context()["params"]["days"]
-        Variable.set(WORLD_POSITION, str(first_day + days))
+        position = first_day + days
+        Variable.set(WORLD_POSITION, str(position))
+        logging.info(
+            "сыграны дни %s–%s, позиция теперь %s", first_day, position - 1, position
+        )
 
     first_day = first_unplayed_day()
     played = _generator(
@@ -196,12 +215,15 @@ def world_live_day():
     Ускорение ×60: модельные сутки укладываются примерно в двадцать четыре
     реальные минуты, и суточная волна разворачивается на глазах. Запускается
     руками; чтобы мир жил так день за днём сам, есть выключатель `world_live`.
+    Какой день пойдёт, знает переменная `world_position`: логическая дата
+    прогона к оси мира отношения не имеет.
     """
 
     @task
     def remember_played(first_day: int) -> None:
         """Позиция ставится по сыгранному дню и только по успеху."""
         Variable.set(WORLD_POSITION, str(first_day + 1))
+        logging.info("сыгран день %s, позиция теперь %s", first_day, first_day + 1)
 
     first_day = first_unplayed_day()
     played = _generator("play_day", ["live", "--day", PLAYED_DAY])
