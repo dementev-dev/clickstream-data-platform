@@ -50,8 +50,6 @@ x-world-starting-days: &world-starting-days "8"
 
 x-airflow-common: &airflow-common
   image: clickstream-airflow:local
-  build:
-    context: ./infra/airflow
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__PARALLELISM: "4"
@@ -105,8 +103,6 @@ x-generator-common: &generator-common
 
 x-superset-common: &superset-common
   image: clickstream-superset:local
-  build:
-    context: ./infra/superset
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
     SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?Скопируйте .env.example в .env}
@@ -257,6 +253,10 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    # Общий образ собирает один владелец. Остальные службы зависят от init и
+    # не запускают параллельный экспорт того же тега через Buildx.
+    build:
+      context: ./infra/airflow
     user: "0:0"
     restart: "no"
     depends_on:
@@ -340,6 +340,9 @@ services:
 
   superset-init:
     <<: *superset-common
+    # Superset использует тот же образ после успешной подготовки.
+    build:
+      context: ./infra/superset
     restart: "no"
     healthcheck:
       disable: true
