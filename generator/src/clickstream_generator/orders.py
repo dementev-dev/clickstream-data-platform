@@ -24,11 +24,13 @@
 одной доли перебрасывала бы весь подпоток после себя
 (docs/architecture/orders/fate.md).
 
-**Судьба заказа — исход и его моменты**: из окна изменяемости заказ выходит
-оплаченным или отменённым, а когда именно это случилось, сказано смещением в
-секундах от рождения заказа. Момента, которого у исхода нет, нет и в данных:
-его место занимает −1, а не ноль, — иначе «оплатили в секунду рождения» было
-бы не отличить от «не оплатили вовсе».
+**Судьба заказа — исход, его моменты и задержка выгрузки**. Из окна
+изменяемости заказ выходит оплаченным или отменённым, а когда именно это
+случилось, сказано смещением в секундах от рождения заказа. Момента, которого
+у исхода нет, нет и в данных: его место занимает −1, а не ноль, — иначе
+«оплатили в секунду рождения» было бы не отличить от «не оплатили вовсе».
+Задержка говорит, сколько ранних слепков заказ пропустит; назначенный планом
+приезжает сразу.
 
 **Состояние на границе суток** — чтение готовой судьбы, а не накопление:
 слепок дня D учитывает моменты не позже границы D|D+1 и по ним называет
@@ -62,6 +64,7 @@ _DELIVERY_CUMULATIVE = np.cumsum(
 )
 _OUTCOME_CUMULATIVE = np.cumsum(world.ORDER_OUTCOME_WEIGHTS)
 _MOMENT_HOUR_CUMULATIVE = np.cumsum(world.ORDER_MOMENT_HOUR_WEIGHTS)
+_SNAPSHOT_DELAY_CUMULATIVE = np.cumsum(world.ORDER_SNAPSHOT_DELAY_WEIGHTS)
 
 
 class OrderOutcome(IntEnum):
@@ -103,12 +106,18 @@ class Orders:
     outcome: NDArray[np.int64]
     paid_after: NDArray[np.int64]
     cancelled_after: NDArray[np.int64]
+    snapshot_delay: NDArray[np.int64]
 
     def __len__(self) -> int:
         return self.user_id.size
 
 
-def of_day(seed: int, day: int, purchases: Purchases) -> Orders:
+def of_day(
+    seed: int,
+    day: int,
+    purchases: Purchases,
+    assigned_order: NDArray[np.bool_],
+) -> Orders:
     """Заказы дня `day`: его покупки, к которым бэкенд добавил свои деньги."""
     rng = day_stream(seed, day, Component.ORDERS)
     delivery = _delivery(rng, len(purchases))
@@ -116,6 +125,7 @@ def of_day(seed: int, day: int, purchases: Purchases) -> Orders:
     product, quantity, items_total = _delta(rng, purchases)
     created_at = _created_at(rng, purchases)
     discount = _discount(purchases, items_total)
+    snapshot_delay = _snapshot_delay(rng, assigned_order)
     return Orders(
         day=day,
         order_id=purchases.order_id,
@@ -130,6 +140,7 @@ def of_day(seed: int, day: int, purchases: Purchases) -> Orders:
         outcome=outcome,
         paid_after=paid_after,
         cancelled_after=cancelled_after,
+        snapshot_delay=snapshot_delay,
     )
 
 
@@ -164,6 +175,11 @@ def at_boundary(rows: Orders, day: int) -> tuple[list[str], NDArray[np.datetime6
         got_cancelled, cancelled, np.where(got_paid, paid, rows.created_at)
     )
     return status.tolist(), updated
+
+
+def arrived(rows: Orders, day: int) -> NDArray[np.bool_]:
+    """Какие заказы уже попали в выгрузку к слепку дня `day`."""
+    return rows.day + rows.snapshot_delay <= day
 
 
 def _boundary(day: int) -> np.datetime64:
@@ -216,6 +232,15 @@ def _created_at(
     return purchases.moment.astype("datetime64[ms]") + millisecond.astype(
         "timedelta64[ms]"
     )
+
+
+def _snapshot_delay(
+    rng: np.random.Generator,
+    assigned_order: NDArray[np.bool_],
+) -> NDArray[np.int64]:
+    """Сколько ранних слепков пропустит заказ; назначенный приезжает сразу."""
+    delay = pick(rng, _SNAPSHOT_DELAY_CUMULATIVE, assigned_order.size)
+    return np.where(assigned_order, 0, delay)
 
 
 def _moment(rng: np.random.Generator, orders: int) -> NDArray[np.int64]:

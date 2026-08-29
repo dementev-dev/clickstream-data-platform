@@ -165,7 +165,7 @@ def stream(seed: int, day: int) -> Day:
     # покупки дня — из них заказная сторона собирает заказы.
     person = np.repeat(audience.person_id[visits.cookie], visits.pages)
     assigned_order = np.repeat(visits.ordering, visits.pages)
-    columns, page, product, purchases, purchase_outcome = commerce.weave(
+    woven = commerce.weave(
         seed,
         day,
         {name: value[order] for name, value in columns.items()},
@@ -176,11 +176,11 @@ def stream(seed: int, day: int) -> Day:
     )
     return Day(
         day=day,
-        columns=columns,
-        page=page,
-        product=product,
-        orders=orders.of_day(seed, day, purchases),
-        purchase_outcome=purchase_outcome,
+        columns=woven.columns,
+        page=woven.page,
+        product=woven.product,
+        orders=orders.of_day(seed, day, woven.purchases, woven.assigned_order),
+        purchase_outcome=woven.event_outcome,
     )
 
 

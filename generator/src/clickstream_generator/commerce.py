@@ -186,14 +186,18 @@ class _Events:
     basket: NDArray[np.int64]
 
 
-# Что торговая половина отдает дню: поток, покупки и их событийные исходы.
-Woven = tuple[
-    dict[str, NDArray[Any]],
-    NDArray[np.uint8],
-    NDArray[np.int64],
-    Purchases,
-    NDArray[np.int8],
-]
+@dataclass(frozen=True, slots=True)
+class Woven:
+    """Что торговая половина отдает дню после вплетения событий."""
+
+    columns: dict[str, NDArray[Any]]
+    page: NDArray[np.uint8]
+    product: NDArray[np.int64]
+    purchases: Purchases
+    event_outcome: NDArray[np.int8]
+    # Для каждой покупки: назначен ли её заказ планом.
+    assigned_order: NDArray[np.bool_]
+
 
 # День без единой корзины: покупок в нём нет, а форма у рядов есть.
 _NO_PURCHASES = Purchases(
@@ -206,6 +210,7 @@ _NO_PURCHASES = Purchases(
     moment=np.empty(0, dtype="datetime64[s]"),
 )
 _NO_EVENT_OUTCOMES = np.empty(0, dtype=np.int8)
+_NO_ASSIGNED_ORDERS = np.empty(0, dtype=np.bool_)
 
 
 def weave(
@@ -230,7 +235,14 @@ def weave(
     rng = day_stream(seed, day, Component.COMMERCE)
     baskets = _baskets(rng, page, product, columns["VisitID"])
     if not len(baskets):
-        return columns, page, product, _NO_PURCHASES, _NO_EVENT_OUTCOMES
+        return Woven(
+            columns=columns,
+            page=page,
+            product=product,
+            purchases=_NO_PURCHASES,
+            event_outcome=_NO_EVENT_OUTCOMES,
+            assigned_order=_NO_ASSIGNED_ORDERS,
+        )
 
     goods = catalog.catalog()
     draws = _draws(rng, baskets)
@@ -247,7 +259,14 @@ def weave(
     columns, page, product, event_outcome = _corrupt_events(
         seed, day, columns, page, product, purchases, assigned
     )
-    return columns, page, product, purchases, event_outcome
+    return Woven(
+        columns=columns,
+        page=page,
+        product=product,
+        purchases=purchases,
+        event_outcome=event_outcome,
+        assigned_order=assigned,
+    )
 
 
 def _draws(rng: np.random.Generator, baskets: _Baskets) -> _Draws:

@@ -45,7 +45,7 @@ from numpy.typing import NDArray
 
 from clickstream_generator import catalog, schema, world
 from clickstream_generator.day import Day
-from clickstream_generator.orders import Orders, at_boundary
+from clickstream_generator.orders import Orders, arrived, at_boundary
 
 _ARRAY_PREFIX = "Array("
 
@@ -72,9 +72,10 @@ def events(day: Day, limit: int | None = None) -> list[bytes]:
 def orders(window: Sequence[Orders], day: int) -> list[bytes]:
     """Канонические байты слепка дня `day`: по документу JSON на заказ.
 
-    `window` — заказы дней окна, от раннего дня к позднему: слепок несёт их
-    подряд, и порядок строк выходит порядком рождения заказов, он же
-    возрастание `order_id`. Какие это дни, решает `orders.window`.
+    `window` — заказы дней окна, от раннего дня к позднему. Уже приехавшие
+    заказы слепок несёт подряд, поэтому порядок строк остаётся порядком
+    рождения, он же возрастание `order_id`. Какие это дни, решает
+    `orders.window`.
 
     Деньги уезжают строками с ровно двумя знаками, а не числами: у заказа они
     станут `Decimal`, и дробь двоичного числа была бы потерей точности до
@@ -97,7 +98,8 @@ def orders(window: Sequence[Orders], day: int) -> list[bytes]:
         delivery = rows.delivery.tolist()
         total = rows.total.tolist()
 
-        for number, order_id in enumerate(rows.order_id):
+        for number in np.flatnonzero(arrived(rows, day)).tolist():
+            order_id = rows.order_id[number]
             payloads.append(
                 orjson.dumps(
                     {

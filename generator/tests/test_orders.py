@@ -87,6 +87,25 @@ def test_every_order_of_the_day_is_a_purchase_of_the_day(weekday: day.Day):
     )
 
 
+def test_an_assigned_order_never_waits_for_a_later_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Гарантия плана сильнее опоздания: мост склейки приезжает сразу."""
+    # Все неназначенные заказы опаздывают на два дня. Нулевую задержку после
+    # такого броска могут получить только заказы, защищённые планом.
+    monkeypatch.setattr(
+        orders, "_SNAPSHOT_DELAY_CUMULATIVE", np.array([0, 0, 1], dtype=np.int64)
+    )
+    events = day.stream(CANONICAL_SEED, WEEKDAY)
+    audience = plan.audience(CANONICAL_SEED, WEEKDAY)
+
+    promised = set(audience.person_id[audience.assigned_order].tolist())
+    immediate = set(events.orders.user_id[events.orders.snapshot_delay == 0].tolist())
+    assert promised
+    assert immediate == promised
+    assert (events.orders.snapshot_delay == 2).any()
+
+
 def dropped_line(client: list[tuple[Any, int]], order: list[tuple[Any, int]]):
     """Единственный индекс, удалением которого корзина клиента даёт заказ."""
     for gone in range(len(client)):

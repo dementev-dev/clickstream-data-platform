@@ -68,6 +68,7 @@ def orders(events: day.Day) -> list[list[Any]]:
             int(theirs.outcome[number]),
             int(theirs.paid_after[number]),
             int(theirs.cancelled_after[number]),
+            int(theirs.snapshot_delay[number]),
         ]
         for number in range(len(theirs))
     ]
