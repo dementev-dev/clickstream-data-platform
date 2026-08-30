@@ -27,6 +27,9 @@ INVENTORY_PATH = Path(__file__).resolve().parents[2] / "data" / "world-inventory
 # отправляемых; этот дешевле прочих — его окно короче.
 RUN_DAY = 2
 
+# День любой: хеш дня не зависит ни от соседей, ни от края описи.
+REPLAY_DAY = 4
+
 
 @pytest.fixture(scope="module")
 def inventory() -> dict:
@@ -79,4 +82,18 @@ def test_the_inventory_holds_the_hash_of_every_sent_snapshot(inventory: dict, tm
     sent = hashlib.sha256(path.read_bytes()).hexdigest()
 
     row = next(row for row in inventory["snapshots"] if row["day"] == RUN_DAY - 1)
+    assert row["sha256"] == sent
+
+
+def test_a_replayed_day_matches_its_inventory_hash(tmp_path):
+    """Опись сверяется с байтами, вышедшими из CLI, а не с собранной тут же:
+    пересчет сравнивался бы сам с собой.
+    """
+    stored = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
+    path = tmp_path / "day.jsonl"
+
+    assert cli.main(["batch", "--day", str(REPLAY_DAY), "--file", str(path)]) == 0
+
+    sent = hashlib.sha256(path.read_bytes()).hexdigest()
+    row = next(row for row in stored["days"] if row["day"] == REPLAY_DAY)
     assert row["sha256"] == sent
