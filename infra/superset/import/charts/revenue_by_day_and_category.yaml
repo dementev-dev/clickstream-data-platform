@@ -1,0 +1,30 @@
+slice_name: Выручка по дням и категориям
+description: null
+certified_by: null
+certification_details: null
+viz_type: echarts_timeseries_bar
+params:
+  viz_type: echarts_timeseries_bar
+  x_axis: report_date
+  metrics:
+  - revenue
+  groupby:
+  - product_category
+  adhoc_filters:
+  - expressionType: SIMPLE
+    subject: report_date
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    clause: WHERE
+  row_limit: 10000
+  stack: Stack
+  orientation: vertical
+  show_legend: true
+  rich_tooltip: true
+  show_value: false
+  y_axis_format: ',.2f'
+  x_axis_time_format: smart_date
+cache_timeout: null
+uuid: 19600000-0000-4000-8000-000000000101
+version: 1.0.0
+dataset_uuid: 19600000-0000-4000-8000-000000000001
