@@ -123,8 +123,9 @@ ClickHouse отвечает сразу.
 
 Двадцать секунд из ее ста семидесяти шести — пересборка восьми модельных дней
 для сверки с описью мира (20,5 с из 176,5). Дешевле хеши не сравнить: чтобы
-узнать, тот ли получается мир, его надо получить. Место выбрано по той же оси «кого
-спрашивают» — вопрос обращён к коду генератора, стенд ему не нужен, — и
+узнать, тот ли получается мир, его надо получить. Место выбрано по той же
+оси «кого спрашивают» — вопрос обращён к коду генератора, стенд ему не
+нужен, — и
 краснеет проверка там, где надо: сразу после правки генератора. Не будь её,
 расхождение всплыло бы получасом позже, на поднятом стенде, где выглядит
 поломкой хранилища, а не забытой пересборкой.
@@ -237,6 +238,56 @@ Kafka → STG → ODS, и живёт он в `make check-clickhouse`.
 утверждает смоук.
 
 ## Что проверено
+
+**Калибровка заказной стороны 30 августа 2026 года при исполнении #194.**
+Пересборки эталонного мира не будет (#192), поэтому доли заказной стороны
+сверены замером внутренностей генератора — окно 28 модельных дней,
+канонический seed, без транспорта, — тем же приемом, каким `test_plan.py` и
+`test_commerce.py` меряют мир. Команда (из `generator/`):
+
+```bash
+uv run python - <<'PY'
+from collections import Counter
+from clickstream_generator import day, inventory, orders, world
+from clickstream_generator.seeds import CANONICAL_SEED
+
+WINDOW = 28
+class_totals: Counter[str] = Counter()
+outcome_totals: Counter[int] = Counter()
+delivery_totals: Counter[int] = Counter()
+delay_totals: Counter[int] = Counter()
+total_orders = 0
+
+for d in range(WINDOW):
+    today = day.stream(CANONICAL_SEED, d)
+    for key, value in inventory._order_class_counts(today).items():
+        class_totals[key] += value
+    money = today.orders
+    total_orders += len(money)
+    for value in money.outcome.tolist():
+        outcome_totals[value] += 1
+    for value in money.delivery.tolist():
+        delivery_totals[value] += 1
+    for value in money.snapshot_delay.tolist():
+        delay_totals[value] += 1
+
+print(total_orders, dict(class_totals), dict(outcome_totals),
+      dict(delivery_totals), dict(delay_totals))
+PY
+```
+
+6973 заказов за 28 дней. Доли из таблицы сверки (после приоритета классов):
+отменено 5,15% (ориентир мастер-спеки ~5%, в пределах; из них 3,03%
+оплачен-потом-отменен и 2,12% отменен неоплаченным — веса `world.py`
+95/3/2); дубль `purchase` 1,89% (ориентир ~2%, в пределах); дельта суммы
+1,32% (ориентир 1–2%, в пределах); потеря `purchase` 1,78% при броске 3% —
+вычеты штатные: назначенные планом покупки из броска исключены (мост
+склейки), часть случаев уходит в отмену приоритетом; наблюдаемая доля
+принята решением владельца (#194). Стоимость доставки — 35,5% / 49,2%
+/ 15,4%, совпадает с весами `DELIVERY_KOPECKS_WEIGHTS`. Опоздание слепков
+(`ORDER_SNAPSHOT_DELAY_WEIGHTS`) — доля заказов с δ>0 составила 8,39%
+(ориентир мастер-спеки ~10%, в пределах). Скрипт замера в репозиторий не
+входит; вывод — в отчете issue #194.
 
 **Перезамер 30 августа 2026 года при исполнении #192.** Команды запускались
 из `generator/`:
