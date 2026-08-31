@@ -1,0 +1,136 @@
+table_name: purchase_vs_orders_v
+main_dttm_col: order_day
+currency_code_column: null
+description: null
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: dm
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+folders: null
+uuid: 19600000-0000-4000-8000-000000000002
+metrics:
+- metric_name: order_count
+  verbose_name: Количество заказов
+  metric_type: null
+  expression: COUNT(order_id)
+  description: null
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: items_total
+  verbose_name: Сумма позиций заказа
+  is_dttm: false
+  is_active: true
+  type: NULLABLE(DECIMAL(18, 2))
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: _load_ts
+  verbose_name: Время загрузки
+  is_dttm: true
+  is_active: true
+  type: DATETIME64(3, 'UTC')
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: declared_revenue
+  verbose_name: Выручка purchase
+  is_dttm: false
+  is_active: true
+  type: NULLABLE(DECIMAL(18, 2))
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: status
+  verbose_name: Статус заказа
+  is_dttm: false
+  is_active: true
+  type: LOWCARDINALITY(NULLABLE(STRING))
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: mismatch_class
+  verbose_name: Класс расхождения
+  is_dttm: false
+  is_active: true
+  type: LOWCARDINALITY(STRING)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: order_day
+  verbose_name: День заказа
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: _load_id
+  verbose_name: Запуск загрузки
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: order_id
+  verbose_name: Заказ
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+version: 1.0.0
+database_uuid: 4b8f2c6e-1d3a-4f5b-9c7d-2e8a1f0b3c5d

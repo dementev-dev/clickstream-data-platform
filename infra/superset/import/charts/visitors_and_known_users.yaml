@@ -1,0 +1,29 @@
+slice_name: Посетители и известные пользователи
+description: null
+certified_by: null
+certification_details: null
+viz_type: echarts_timeseries_line
+params:
+  viz_type: echarts_timeseries_line
+  x_axis: report_date
+  metrics:
+  - visitors
+  - known_users
+  groupby: []
+  adhoc_filters:
+  - expressionType: SIMPLE
+    subject: report_date
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    clause: WHERE
+  row_limit: 10000
+  seriesType: echarts_timeseries_line
+  show_legend: true
+  rich_tooltip: true
+  show_value: false
+  y_axis_format: ',d'
+  x_axis_time_format: smart_date
+cache_timeout: null
+uuid: 19600000-0000-4000-8000-000000000103
+version: 1.0.0
+dataset_uuid: 19600000-0000-4000-8000-000000000003

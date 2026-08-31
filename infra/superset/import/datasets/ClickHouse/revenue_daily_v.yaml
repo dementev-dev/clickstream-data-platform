@@ -1,0 +1,138 @@
+table_name: revenue_daily_v
+main_dttm_col: report_date
+currency_code_column: null
+description: null
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: dm
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+folders: null
+uuid: 19600000-0000-4000-8000-000000000001
+metrics:
+- metric_name: revenue
+  verbose_name: Выручка
+  metric_type: null
+  expression: SUM(revenue)
+  description: null
+  d3format: ',.2f'
+  currency:
+    symbol: ₽
+    symbolPosition: suffix
+  extra: null
+  warning_text: null
+columns:
+- column_name: _load_ts
+  verbose_name: Время загрузки
+  is_dttm: true
+  is_active: true
+  type: DATETIME64(3, 'UTC')
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: aov
+  verbose_name: Средний чек
+  is_dttm: false
+  is_active: true
+  type: DECIMAL(18, 2)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: revenue
+  verbose_name: Выручка
+  is_dttm: false
+  is_active: true
+  type: DECIMAL(18, 2)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: product_category
+  verbose_name: Категория товара
+  is_dttm: false
+  is_active: true
+  type: LOWCARDINALITY(STRING)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: _load_id
+  verbose_name: Запуск загрузки
+  is_dttm: false
+  is_active: true
+  type: STRING
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: orders
+  verbose_name: Заказы
+  is_dttm: false
+  is_active: true
+  type: UINT64
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: units
+  verbose_name: Товары
+  is_dttm: false
+  is_active: true
+  type: UINT64
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: report_date
+  verbose_name: Дата
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+version: 1.0.0
+database_uuid: 4b8f2c6e-1d3a-4f5b-9c7d-2e8a1f0b3c5d

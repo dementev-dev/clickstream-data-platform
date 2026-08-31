@@ -1,0 +1,105 @@
+dashboard_title: Бизнес-сюжеты
+description: null
+css: null
+slug: business-stories
+certified_by: null
+certification_details: null
+published: true
+uuid: 19600000-0000-4000-8000-000000000201
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    id: ROOT_ID
+    type: ROOT
+    children:
+    - GRID_ID
+  GRID_ID:
+    id: GRID_ID
+    type: GRID
+    parents:
+    - ROOT_ID
+    children:
+    - ROW-revenue
+    - ROW-pvo
+    - ROW-traffic
+  ROW-revenue:
+    id: ROW-revenue
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    children:
+    - CHART-revenue
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-revenue:
+    id: CHART-revenue
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-revenue
+    children: []
+    meta:
+      chartId: 1
+      height: 50
+      width: 12
+      sliceName: Выручка по дням и категориям
+      uuid: 19600000-0000-4000-8000-000000000101
+  ROW-pvo:
+    id: ROW-pvo
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    children:
+    - CHART-pvo
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-pvo:
+    id: CHART-pvo
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-pvo
+    children: []
+    meta:
+      chartId: 2
+      height: 50
+      width: 12
+      sliceName: Сверка purchase и заказов
+      uuid: 19600000-0000-4000-8000-000000000102
+  ROW-traffic:
+    id: ROW-traffic
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    children:
+    - CHART-traffic
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-traffic:
+    id: CHART-traffic
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-traffic
+    children: []
+    meta:
+      chartId: 3
+      height: 50
+      width: 12
+      sliceName: Посетители и известные пользователи
+      uuid: 19600000-0000-4000-8000-000000000103
+metadata:
+  color_scheme: supersetColors
+  cross_filters_enabled: false
+  chart_configuration: {}
+  expanded_slices: {}
+  default_filters: '{}'
+  native_filter_configuration: []
+theme_uuid: null
+version: 1.0.0
