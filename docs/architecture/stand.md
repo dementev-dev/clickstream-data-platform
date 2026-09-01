@@ -91,8 +91,11 @@ ClickHouse:
 создавал отдельный путь каждого шарда без вписанных вручную значений. Для
 образа зафиксирован точный текущий
 [LTS-выпуск 26.3.17.56](https://github.com/ClickHouse/ClickHouse/releases/tag/v26.3.17.56-lts);
-серверы и keeper используют один образ. Настройки Kafka 4.3.1 сверены с
+серверы и keeper используют один образ.
+
+Настройки Kafka 4.3.1 сверены с
 [примером односерверного KRaft](https://github.com/apache/kafka/blob/4.3.1/docker/examples/docker-compose-files/single-node/plaintext/docker-compose.yml).
+
 Секция метрик взята из конфигурации закреплённого образа ClickHouse и проверена
 на серверах и keeper. Подготовка источников Grafana сверена с
 [официальным описанием автоматической настройки](https://grafana.com/docs/grafana/latest/administration/provisioning/)
@@ -116,6 +119,7 @@ Airflow закреплён на 3.3.0. Состав обязательных п�
 `clickhouse-connect`. Официальный провайдер Kafka сам использует
 `confluent-kafka`; отдельное подключение и его обёртки здесь не нужны, поэтому
 клиент Kafka добавлен в образ напрямую.
+
 Superset закреплён на 6.1.0; драйвер `clickhouse-connect`, форма
 `clickhousedb://` и драйвер Postgres сверены с
 [документацией подключений Superset](https://superset.apache.org/user-docs/6.1.0/databases/)
