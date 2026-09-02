@@ -104,7 +104,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Поток: сколько строк приезжает в слой сырья",
+      "title": "Поток: сколько строк приезжает в сырой слой",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"

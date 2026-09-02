@@ -167,7 +167,7 @@ def test_the_moments_carry_real_milliseconds(days: list[day_module.Day]):
 def test_the_rows_go_in_the_order_of_birth(days: list[day_module.Day]):
     """Порядок строк слепка — порядок рождения заказов, он же рост номера.
 
-    Хешу слепка в описи нужен именно названный порядок: детерминизм даёт его
+    Хешу слепка в паспорте нужен именно названный порядок: детерминизм даёт его
     даром, но обещание побайтового повтора держится на нём, а не на удаче.
     """
     numbers = [record["order_id"] for record in snapshot_records(days, FULL_WINDOW_DAY)]
