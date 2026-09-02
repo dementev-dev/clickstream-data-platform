@@ -124,7 +124,7 @@ SELECT
     _load_ts
 FROM stg.orders_raw_dist
 WHERE _load_id = {load_id:String} AND NOT row_is_valid
--- Тот же ноль: ключ брака сегодня совпадает с ключом сырья, и локальная
+-- Тот же ноль: ключ брака сегодня совпадает с ключом STG, и локальная
 -- запись легла бы верно — но по совпадению, а не по контракту.
 SETTINGS distributed_foreground_insert = 1,
     parallel_distributed_insert_select = 0;

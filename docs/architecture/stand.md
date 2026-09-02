@@ -17,27 +17,28 @@
   `airflow` и `superset`;
 - `airflow-apiserver`, `airflow-scheduler` и `airflow-dag-processor` —
   Airflow 3.3 с LocalExecutor, без triggerer;
-- `superset` — интерфейс и подготовленное подключение ClickHouse;
+- `superset` — интерфейс с заранее настроенным подключением к ClickHouse;
 - `prometheus` и `grafana` — сбор и просмотр метрик ClickHouse и Kafka.
 
 ## Пользователи и роли ClickHouse
 
 В ClickHouse семь пользователей и шесть ролей:
 
-- `etl` подключает рабочие даги Airflow; роль `etl_writer` читает и пишет слои
-  хранилища;
-- `lifecycle` применяет канонический DDL и пересоздаёт прикладные базы; роль
-  `lifecycle_owner` не даёт эти административные права рабочим дагам;
-- `bi` подключает Superset; роль `bi_reader` читает ODS, DDS, DM и справочники
-  `dic`, а запросы Superset обращаются к публичным `_v`;
-- `analyst` предназначен для подключения человека и читает все слои и
-  справочники;
-- `grafana` с ролью `monitoring_reader` подключает Grafana и читает все слои,
+- `etl` — учётная запись рабочих дагов Airflow; роль `etl_writer` читает и
+  пишет слои хранилища;
+- `lifecycle` — учётная запись дагов жизненного цикла; роль `lifecycle_owner`
+  разрешает им применять канонический DDL и пересоздавать прикладные базы. У
+  рабочих дагов этих административных прав нет;
+- `bi` — учётная запись Superset; роль `bi_reader` читает ODS, DDS, DM и
+  справочники `dic`, а запросы Superset обращаются к публичным `_v`;
+- `analyst` — учётная запись аналитика с правом чтения всех слоёв и
+  справочников;
+- `grafana` — учётная запись Grafana; роль `monitoring_reader` читает все слои,
   системные таблицы и данные со всех реплик кластера;
-- `dict` читает только базу `dic` и пароля не имеет: им словарь товаров ходит
-  за своей подложкой;
-- `default` остаётся служебным: им ходят проверки здоровья и скрипты внутри
-  контейнеров, но не приложения.
+- `dict` — беспарольная учётная запись словаря товаров с правом чтения базы
+  `dic`; словарь читает через неё свою подложку;
+- `default` — служебная учётная запись для проверок состояния и скриптов внутри
+  контейнеров; приложения с ней не подключаются.
 
 Почему пользователи объявлены файлом, а ноды доверяют общему секрету, — в
 [ADR 0007](../adr/0007-clickhouse-access.md).
@@ -48,9 +49,8 @@ Superset получает пароль `bi`, а Grafana — пароль `grafan
 
 ## Применение настроек
 
-Изменения значений ClickHouse в `.env` и файлов настройки серверов в
-`infra/clickhouse/config.d/` и `infra/clickhouse/users.d/` применяются
-пересозданием нод:
+Чтобы применить новые значения ClickHouse из `.env` или изменения файлов в
+`infra/clickhouse/config.d/` и `infra/clickhouse/users.d/`, пересоздайте ноды:
 
 ```bash
 docker compose up --force-recreate --wait clickhouse-01 clickhouse-02
@@ -62,9 +62,8 @@ docker compose up --force-recreate --wait clickhouse-01 clickhouse-02
 
 ## Секреты и порты
 
-Пароли ClickHouse и интерфейсов, пароли Postgres, ключи Airflow и Superset,
-отсутствие проверки доступа у Kafka и Prometheus — намеренно простые и явно
-ненастоящие настройки локального учебного стенда. Это не пример настройки
+В локальном учебном стенде намеренно используются простые ненастоящие пароли и
+ключи. Kafka и Prometheus работают без проверки доступа. Это не пример настройки
 защиты: не копируйте значения из `.env.example` в рабочую среду. Все
 опубликованные порты привязаны только к `127.0.0.1`; Postgres наружу не
 опубликован.
@@ -84,20 +83,22 @@ ClickHouse:
 [ReplicatedMergeTree](https://clickhouse.com/docs/engines/table-engines/mergetree-family/replication),
 [ON CLUSTER](https://clickhouse.com/docs/sql-reference/distributed-ddl) и
 [Distributed](https://clickhouse.com/docs/engines/table-engines/special/distributed).
-Описание кластера задаётся через `remote_servers`, макросы — через `macros`,
-подключение к keeper — через `zookeeper`; путь `ReplicatedMergeTree` содержит
-`{shard}` и `{replica}`, а `Distributed` получает имя кластера, базу, локальную
-таблицу и ключ шардирования. Макросы выбраны, чтобы один DDL через `ON CLUSTER`
-создавал отдельный путь каждого шарда без вписанных вручную значений. Для
-образа зафиксирован точный текущий
-[LTS-выпуск 26.3.17.56](https://github.com/ClickHouse/ClickHouse/releases/tag/v26.3.17.56-lts);
+Кластер описан в `remote_servers`, макросы — в `macros`, а подключение к
+keeper — в `zookeeper`. Путь `ReplicatedMergeTree` содержит `{shard}` и
+`{replica}`.
+Для `Distributed` задаются имя кластера, база, локальная таблица и ключ
+шардирования. Макросы выбраны, чтобы один DDL через `ON CLUSTER` создавал
+отдельный путь для каждого шарда без вписанных вручную значений. В образе
+закреплена точная версия текущего LTS-выпуска —
+[26.3.17.56](https://github.com/ClickHouse/ClickHouse/releases/tag/v26.3.17.56-lts);
 серверы и keeper используют один образ.
 
 Настройки Kafka 4.3.1 сверены с
 [примером односерверного KRaft](https://github.com/apache/kafka/blob/4.3.1/docker/examples/docker-compose-files/single-node/plaintext/docker-compose.yml).
 
-Секция метрик взята из конфигурации закреплённого образа ClickHouse и проверена
-на серверах и keeper. Подготовка источников Grafana сверена с
+Раздел метрик взят из конфигурации закреплённого образа ClickHouse и проверен
+на серверах и keeper. Автоматическая настройка источников данных Grafana
+сверена с
 [официальным описанием автоматической настройки](https://grafana.com/docs/grafana/latest/administration/provisioning/)
 и [документацией плагина ClickHouse](https://grafana.com/docs/plugins/grafana-clickhouse-datasource/latest/configure/).
 Prometheus собирает встроенные метрики двух серверов и keeper, а через
@@ -109,18 +110,18 @@ Prometheus собирает встроенные метрики двух сер�
 пока нет.
 
 Airflow закреплён на 3.3.0. Состав обязательных процессов, LocalExecutor,
-публичный `airflow.sdk`, API здоровья и SimpleAuthManager сверены с
+публичный `airflow.sdk`, API проверки состояния и SimpleAuthManager сверены с
 [архитектурой Airflow 3.3](https://airflow.apache.org/docs/apache-airflow/3.3.0/core-concepts/overview.html),
 [публичным интерфейсом](https://airflow.apache.org/docs/apache-airflow/3.3.0/public-airflow-interface.html)
 и [описанием здоровья](https://airflow.apache.org/docs/apache-airflow/3.3.0/administration-and-deployment/logging-monitoring/check-health.html).
 Для ClickHouse установлен официальный провайдер Airflow: SQL-файлы исполняет
 общий `SQLExecuteQueryOperator`, программные запросы идут через
 `ClickHouseHook`. Провайдер работает поверх закреплённого
-`clickhouse-connect`. Официальный провайдер Kafka сам использует
-`confluent-kafka`; отдельное подключение и его обёртки здесь не нужны, поэтому
-клиент Kafka добавлен в образ напрямую.
+`clickhouse-connect`. Официальный провайдер Kafka уже использует
+`confluent-kafka`. В стенде клиент добавлен в образ напрямую, без отдельного
+подключения Airflow и обёрток провайдера.
 
-Superset закреплён на 6.1.0; драйвер `clickhouse-connect`, форма
-`clickhousedb://` и драйвер Postgres сверены с
+Superset закреплён на 6.1.0; драйвер `clickhouse-connect`, схема адреса
+подключения `clickhousedb://` и драйвер Postgres сверены с
 [документацией подключений Superset](https://superset.apache.org/user-docs/6.1.0/databases/)
 и [настройкой базы метаданных](https://superset.apache.org/admin-docs/6.1.0/configuration/configuring-superset/).

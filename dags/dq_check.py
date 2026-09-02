@@ -148,7 +148,7 @@ def build_classes_vs_inventory() -> list[str]:
         for mismatch_class, count in day["orders"].items()
     }
     if not expected:
-        raise AirflowException("classes_vs_inventory: в описи нет закрытых дней")
+        raise AirflowException("classes_vs_inventory: в паспорте нет закрытых дней")
 
     query = (SQL_ROOT / "dq" / "classes_vs_inventory.sql").read_text(encoding="utf-8")
     # GROUP BY закономерно не возвращает группу из нуля строк.

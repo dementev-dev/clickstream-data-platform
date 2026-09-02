@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_demo_runs_and_shows_the_whole_chain() -> None:
-    """Сторожит команду и стадии, а числа мира оставляет описи."""
+    """Сторожит команду и стадии, а проверку чисел мира оставляет паспорту."""
     finished = subprocess.run(
         ["make", "--silent", "demo"],
         check=False,

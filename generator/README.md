@@ -64,8 +64,8 @@
 - `src/clickstream_generator/schema_doc.py` — сборка «описания выгрузки»
   ([`docs/formats/clickstream-event.md`](../docs/formats/clickstream-event.md))
   из контракта. Документ руками не правят — пересобирают.
-- `src/clickstream_generator/inventory.py` — сборка описи мира
-  ([`data/world-inventory.json`](../data/world-inventory.json)): паспорт мира
+- `src/clickstream_generator/inventory.py` — сборка паспорта мира
+  ([`data/world-inventory.json`](../data/world-inventory.json)): шапка паспорта
   и хеши восьми дней, которыми наполняется стенд, плюс счётчики классов
   расхождений по заказам для дней с закрытым окном. Руками не правят —
   пересобирают целью `make inventory`.
@@ -88,7 +88,7 @@
 - `make typecheck` — ty: проверка типов;
 - `make demo` — пройти стадии канонического D0 на одном экране;
 - `make docs` — пересобрать описание выгрузки;
-- `make inventory` — пересобрать опись мира.
+- `make inventory` — пересобрать паспорт мира.
 
 В корне репозитория `make lint` тоже есть, но он про код стенда — даги и
 Superset. Одноимённые цели за разными дверями охватывают разное:

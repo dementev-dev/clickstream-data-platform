@@ -34,7 +34,7 @@ x-clickhouse-common: &clickhouse-common
     retries: 30
     start_period: 10s
 
-# Факты генератора и пульта мира названы по одному разу — иначе они однажды
+# Факты генератора и дагов модельного времени названы по одному разу — иначе они однажды
 # разойдутся, и заметит это не проверка, а менти с пустым топиком.
 x-generator-image: &generator-image clickstream-generator:local
 x-orders-topic: &orders-topic orders
@@ -70,7 +70,7 @@ x-airflow-common: &airflow-common
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ETL_PASSWORD: ${CLICKHOUSE_ETL_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_LIFECYCLE_PASSWORD: ${CLICKHOUSE_LIFECYCLE_PASSWORD:?Скопируйте .env.example в .env}
-    # Пульт мира поднимает генератор отдельным контейнером. Имя сети собирается
+    # Даги времени поднимают генератор отдельным контейнером. Имя сети собирается
     # из имени проекта: у второй копии стенда оно другое.
     <<: *kafka-target
     GENERATOR_IMAGE: *generator-image
@@ -291,7 +291,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
     command: scheduler
-    # Пульт мира зовёт генератор отдельным контейнером, а при LocalExecutor
+    # Даги времени зовут генератор отдельным контейнером, а при LocalExecutor
     # задачи исполняет сам планировщик — значит сокет докера нужен ему одному.
     # Плата названа вслух в README и ADR 0009: доступ к сокету равен праву root
     # на машине. Открывает дверь не монтирование, а группа: у сокета права 660

@@ -185,7 +185,7 @@ def world_initialize():
 
     @task
     def wait_for_events() -> None:
-        """Дождаться приёма всех событий описи, включая строки брака."""
+        """Дождаться приёма всех событий паспорта, включая строки брака."""
         inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
         expected = sum(day["events"] for day in inventory["days"])
         first_date = inventory["days"][0]["date"]
