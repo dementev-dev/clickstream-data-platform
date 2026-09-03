@@ -1,0 +1,1501 @@
+<!-- Файл собран автоматически. Правьте architecture-map/map.yaml и template.html, затем выполните uv run docs/handbook/architecture-map/render.py. -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Карта слоев хранилища</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f7f7f5;
+      --panel: #ffffff;
+      --ink: #272a2d;
+      --muted: #6b7177;
+      --line: #8c9298;
+      --soft: #e6e8e9;
+      --accent: #b54a2a;
+      --accent-soft: #f5ded7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header { padding: 22px 26px 12px; }
+    h1 { margin: 0 0 5px; font-size: 25px; }
+    .lead { margin: 0; color: var(--muted); }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 26px 16px;
+    }
+    .switcher { display: flex; gap: 6px; }
+    button {
+      border: 1px solid #aeb3b7;
+      border-radius: 18px;
+      background: var(--panel);
+      color: var(--ink);
+      padding: 6px 13px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: #71301e;
+    }
+    button:focus-visible, [tabindex="0"]:focus-visible {
+      outline: 3px solid #d79078;
+      outline-offset: 2px;
+    }
+    .legend { display: flex; flex-wrap: wrap; gap: 15px; color: var(--muted); }
+    .legend-item { display: inline-flex; align-items: center; gap: 7px; }
+    .legend-line { width: 34px; border-top: 2px solid var(--line); }
+    .legend-line.dashed { border-top-style: dashed; }
+    .legend-line.dotted { border-top-style: dotted; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 350px;
+      gap: 16px;
+      padding: 0 18px 24px;
+      align-items: start;
+    }
+    .map-scroll {
+      overflow-x: auto;
+      border: 1px solid #d7d9da;
+      border-radius: 10px;
+      background: var(--panel);
+    }
+    svg { display: block; width: 100%; min-width: 980px; height: auto; }
+    .layer-title { font-size: 15px; font-weight: 700; text-anchor: middle; }
+    .layer-caption { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+    .zone-caption { font-size: 12px; fill: var(--muted); }
+    .column-guide { stroke: #eef0f1; stroke-width: 1; }
+    .edge-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.8;
+      marker-end: url(#arrowhead);
+      transition: opacity .15s, stroke .15s, stroke-width .15s;
+    }
+    .edge-line.dashed { stroke-dasharray: 8 6; }
+    .edge-line.dotted { stroke-dasharray: 2 6; stroke-linecap: round; }
+    .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+    .node { cursor: pointer; transition: opacity .15s; }
+    .node rect {
+      fill: #f1f2f2;
+      stroke: #858b90;
+      stroke-width: 1.2;
+      rx: 7;
+      transition: fill .15s, stroke .15s, stroke-width .15s;
+    }
+    .node text {
+      fill: var(--ink);
+      font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+      text-anchor: middle;
+      pointer-events: none;
+    }
+    .node .stream-mark { fill: var(--muted); font: 10px system-ui, sans-serif; }
+    .is-filtered, .is-context-dim { opacity: .16; }
+    .is-path:not(.is-filtered), .is-hover:not(.is-filtered) { opacity: 1; }
+    .is-path .edge-line, .edge.is-path .edge-line {
+      stroke: var(--accent); stroke-width: 2.8; marker-end: url(#arrowhead-active);
+    }
+    .node.is-path rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .node.is-hover rect { fill: #faefeb; stroke: #d79078; }
+    .edge.is-hover .edge-line { stroke: #d79078; stroke-width: 2.2; }
+    .node.is-selected rect { stroke-width: 3; }
+    .edge.is-selected .edge-line { stroke-width: 4; }
+    aside {
+      min-height: 470px;
+      padding: 20px;
+      border: 1px solid #d7d9da;
+      border-radius: 10px;
+      background: var(--panel);
+    }
+    @media (max-width: 1530px) { main { grid-template-columns: minmax(0, 1fr); } aside { min-height: 0; } }
+    aside h2 { margin: 0 0 3px; font-size: 20px; overflow-wrap: anywhere; }
+    .meta { margin: 0 0 18px; color: var(--muted); }
+    .card-section { margin-top: 17px; }
+    .card-section h3 { margin: 0 0 5px; font-size: 13px; }
+    .card-section p { margin: 0; }
+    .card-section ul { margin: 5px 0 0; padding-left: 20px; }
+    .card-section li + li { margin-top: 5px; }
+    code { font: .92em ui-monospace, SFMono-Regular, Consolas, monospace; }
+    a { color: #8a351e; text-underline-offset: 2px; }
+    .hint { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="page-title"></h1>
+    <p class="lead" id="lead"></p>
+  </header>
+  <div class="controls">
+    <div class="switcher" id="switcher" aria-label="Выбор потока"></div>
+    <div class="legend" id="legend" aria-label="Механизмы переноса"></div>
+  </div>
+  <main>
+    <div class="map-scroll">
+      <svg id="map" viewBox="0 0 1230 470" role="group" aria-label="Путь данных через слои хранилища"></svg>
+    </div>
+    <aside id="details" aria-live="polite"></aside>
+  </main>
+  <script>
+    const MAP = {
+  "title": "Карта слоев хранилища",
+  "lead": "Проследите, как один смысл меняет имя и поверхность между слоями.",
+  "chapter_url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/handbook/storage-layers.md#user-content-хранилище-и-его-слои",
+  "intro": [
+    "Эта карта показывает путь событий и заказов от Kafka до витрин DM.",
+    "Щелкните по узлу, чтобы увидеть его назначение, устройство и ключи.",
+    "Щелкните по стрелке, чтобы узнать, кто и каким запросом переносит данные.",
+    "Когда вы выбираете узел, карта подсвечивает все пути к нему и от него.",
+    "Переключатель потока приглушает другую часть карты, но не меняет раскладку.",
+    "Сначала прочитайте главу «Хранилище и его слои», затем вернитесь к карте и рассмотрите объекты."
+  ],
+  "streams": {
+    "all": "Все",
+    "events": "События",
+    "orders": "Заказы"
+  },
+  "dictionary": {
+    "title": "Словарь",
+    "caption": "сбоку цепочки: справочники"
+  },
+  "layers": [
+    {
+      "id": "kafka",
+      "title": "Kafka",
+      "caption": "откуда приходит"
+    },
+    {
+      "id": "stg",
+      "title": "STG",
+      "caption": "как поступило"
+    },
+    {
+      "id": "ods",
+      "title": "ODS",
+      "caption": "язык источника"
+    },
+    {
+      "id": "dds",
+      "title": "DDS",
+      "caption": "язык бизнеса"
+    },
+    {
+      "id": "dm",
+      "title": "DM",
+      "caption": "данные для дашбордов"
+    }
+  ],
+  "mechanisms": [
+    {
+      "id": "materialized_view",
+      "label": "матвью",
+      "line": "solid",
+      "rhythm": "непрерывно, по мере прихода сообщений"
+    },
+    {
+      "id": "airflow_dag",
+      "label": "даг Airflow",
+      "line": "dashed",
+      "rhythm": "пачкой: раз в модельные сутки (`orders_ingest`) или на каждом прогоне конвейера"
+    },
+    {
+      "id": "view",
+      "label": "представление",
+      "line": "dotted",
+      "rhythm": "без копии, данные читаются на месте"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "kafka_hits",
+      "name": "hits",
+      "layer": "kafka",
+      "order": 0,
+      "streams": [
+        "events"
+      ],
+      "what": "Топик Kafka с событиями кликстрима. Каждое сообщение содержит одно событие.",
+      "read": "Топик напрямую не читают: таблица `stg.hits_raw_kafka` забирает сообщения из топика. Для данных событий используйте `stg.hits_raw_dist`.",
+      "fill": [
+        "Источник событий пишет сообщения в топик в темпе выбранного режима мира."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-при%D1%91м-поток-и-его-свойства"
+        },
+        {
+          "label": "Формат",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/formats/clickstream-event.md#user-content-описание-выгрузки-событие-кликстрима"
+        }
+      ]
+    },
+    {
+      "id": "kafka_orders",
+      "name": "orders",
+      "layer": "kafka",
+      "order": 1,
+      "streams": [
+        "orders"
+      ],
+      "what": "Топик Kafka со слепками заказов магазина. После модельного дня приходит снимок изменяемого окна.",
+      "read": "Топик напрямую не читают: таблица `stg.orders_raw_kafka` забирает сообщения из топика. Для заказов используйте `stg.orders_raw_dist`.",
+      "fill": [
+        "Источник заказов публикует слепок пачкой после каждого модельного дня."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-поток-данных"
+        },
+        {
+          "label": "Устройство слепка",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/snapshot.md#user-content-слепок-и-его-доставка"
+        }
+      ]
+    },
+    {
+      "id": "stg_hits",
+      "name": "stg.hits_raw_dist",
+      "layer": "stg",
+      "order": 0,
+      "streams": [
+        "events"
+      ],
+      "what": "Сырая строка события и метаданные доставки. STG сохраняет сообщение без разбора.",
+      "read": "Читайте `_dist`: у STG нет представления `_v`, а распределенная таблица показывает оба шарда.",
+      "parts": [
+        "`stg.hits_raw_kafka` — чтец топика `hits`.",
+        "`stg.hits_raw_rep` — реплицируемая таблица на шарде.",
+        "`stg.hits_raw_dist` — распределенная поверхность записи и чтения.",
+        "`stg.hits_raw_mv` — матвью приема сообщений из чтеца."
+      ],
+      "fill": [
+        "`stg.hits_raw_mv` пишет непрерывно, по мере прихода сообщений.",
+        "Сырые строки живут трое суток реального времени плюс хвост до суток."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-при%D1%91м-поток-и-его-свойства"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/10-stg-tables.sql"
+        },
+        {
+          "label": "DDL матвью",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/40-stg-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "stg_orders",
+      "name": "stg.orders_raw_dist",
+      "layer": "stg",
+      "order": 1,
+      "streams": [
+        "orders"
+      ],
+      "what": "Сырые строки слепка заказов, метаданные доставки и идентификатор пачки `_load_id`.",
+      "read": "Читайте `_dist`: у STG нет представления `_v`, а распределенная таблица показывает оба шарда.",
+      "parts": [
+        "`stg.orders_raw_kafka` — чтец топика `orders` на первой ноде.",
+        "`stg.orders_raw_rep` — реплицируемая таблица на шарде.",
+        "`stg.orders_raw_dist` — распределенная поверхность записи и чтения."
+      ],
+      "fill": [
+        "Задача `pull_batch` дага `orders_ingest` забирает слепок пачкой раз в модельные сутки.",
+        "Сырые строки живут трое суток реального времени плюс хвост до суток."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-поток-данных"
+        },
+        {
+          "label": "DDL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/10-stg-tables.sql"
+        }
+      ]
+    },
+    {
+      "id": "ods_event",
+      "name": "ods.event_v",
+      "layer": "ods",
+      "order": 0,
+      "streams": [
+        "events"
+      ],
+      "what": "Типизированное широкое событие с именами полей источника. Запрос представления с `FINAL` возвращает актуальную версию события.",
+      "read": "Читайте `ods.event_v`: запрос представления с `FINAL` возвращает актуальные строки вместо физических версий.",
+      "parts": [
+        "`ods.event_rep` — реплицируемая таблица версий события на шарде.",
+        "`ods.event_dist` — распределенная поверхность записи и диагностики.",
+        "`ods.event_v` — представление актуального состояния с `FINAL`.",
+        "`ods.event_mv` — матвью разбора годных строк STG."
+      ],
+      "keys": [
+        "`WatchID` — тот же идентификатор, что `event_id` в DDS.",
+        "`ClientID` — тот же посетитель, что `client_id` в DDS.",
+        "`EventDate` — тот же день, что `event_date` в DDS."
+      ],
+      "fill": [
+        "`ods.event_mv` разбирает строки непрерывно, по мере записи в STG.",
+        "`ReplacingMergeTree(_load_ts)` хранит версии, а `FINAL` выбирает актуальную."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-актуальные-события"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/20-ods-tables.sql"
+        },
+        {
+          "label": "DDL представлений",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "ods_event_errors",
+      "name": "ods.event_errors_dist",
+      "layer": "ods",
+      "order": 1,
+      "streams": [
+        "events"
+      ],
+      "what": "Сырые события, которые не прошли строгий прием, с классом ошибки и метаданными доставки.",
+      "read": "Читайте `_dist`: представления `_v` нет, а распределенная таблица показывает ошибки с обоих шардов.",
+      "parts": [
+        "`ods.event_errors_rep` — реплицируемая таблица ошибок на шарде.",
+        "`ods.event_errors_dist` — распределенная поверхность чтения и записи.",
+        "`ods.event_errors_mv` — матвью, которое отбирает негодные строки STG."
+      ],
+      "fill": [
+        "`ods.event_errors_mv` пишет непрерывно, по мере записи в STG.",
+        "Ошибки живут один месяц и не останавливают прием годных событий."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-таблица-ошибок"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/20-ods-tables.sql"
+        },
+        {
+          "label": "DDL матвью",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "ods_order",
+      "name": "ods.order_v",
+      "layer": "ods",
+      "order": 2,
+      "streams": [
+        "orders"
+      ],
+      "what": "Текущая версия заказа на языке источника. Позиции пока остаются сырым фрагментом JSON.",
+      "read": "Читайте `ods.order_v`: запрос представления с `FINAL` возвращает последнюю версию по `snapshot_date`.",
+      "parts": [
+        "`ods.order_rep` — реплицируемая таблица версий заказа на шарде.",
+        "`ods.order_dist` — распределенная поверхность записи и диагностики.",
+        "`ods.order_v` — представление текущего состояния с `FINAL`."
+      ],
+      "keys": [
+        "`order_id` — тот же заказ в `dds.order_v` и `dm.purchase_vs_orders_v`.",
+        "`user_id` — пользователь магазина, который переходит в заказ DDS."
+      ],
+      "fill": [
+        "Задача `parse_batch` дага `orders_ingest` разбирает пачку раз в модельные сутки.",
+        "`ReplacingMergeTree(snapshot_date)` оставляет версию из последнего принятого слепка."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-версии-заказов"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/20-ods-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "ods_order_errors",
+      "name": "ods.order_errors_dist",
+      "layer": "ods",
+      "order": 3,
+      "streams": [
+        "orders"
+      ],
+      "what": "Сырые строки слепка, которые не прошли строгий прием, с классом ошибки и `_load_id`.",
+      "read": "Читайте `_dist`: представления `_v` нет, а распределенная таблица показывает ошибки с обоих шардов.",
+      "parts": [
+        "`ods.order_errors_rep` — реплицируемая таблица ошибок на шарде.",
+        "`ods.order_errors_dist` — распределенная поверхность чтения и записи."
+      ],
+      "fill": [
+        "Задача `parse_batch` дага `orders_ingest` пишет ошибки из той же пачки, что и годные заказы.",
+        "Ошибки живут один месяц и не останавливают прием годных заказов."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-таблица-ошибок"
+        },
+        {
+          "label": "DDL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/20-ods-tables.sql"
+        }
+      ]
+    },
+    {
+      "id": "dds_event",
+      "name": "dds.event_v",
+      "layer": "dds",
+      "order": 0,
+      "streams": [
+        "events"
+      ],
+      "what": "Публичное представление события на языке бизнеса. Его запрос переименовывает поля и расшифровывает категорию устройства.",
+      "read": "Читайте `dds.event_v`: запрос представления возвращает явный список колонок DDS.",
+      "parts": [
+        "`dds.event_v` — только представление над `ods.event_v`; своей таблицы в DDS нет."
+      ],
+      "keys": [
+        "`event_id` — тот же идентификатор, что `WatchID` в ODS.",
+        "`client_id` — тот же посетитель, что `ClientID` в ODS; соединяет событие с сессией и картой идентичностей.",
+        "`event_date` — тот же день, что `EventDate` в ODS.",
+        "`purchase_id[1]` — тот же заказ, что `order_id` в DDS и DM."
+      ],
+      "fill": [
+        "Данные для `dds.event_v` читаются из актуальных событий ODS без копии и отдельного расписания."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/event.md#user-content-форма"
+        },
+        {
+          "label": "DDL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/50-dds-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dds_session",
+      "name": "dds.session_v",
+      "layer": "dds",
+      "order": 1,
+      "streams": [
+        "events"
+      ],
+      "what": "Сессия, которую запрос дага `dds_transform` собирает из последовательных событий одной куки. В источнике готовой сессии нет.",
+      "read": "Читайте `dds.session_v`: запрос представления возвращает деловые и служебные колонки.",
+      "parts": [
+        "`dds.session_rep` — реплицируемая таблица сессий на шарде.",
+        "`dds.session_dist` — распределенная поверхность загрузки и диагностики.",
+        "`dds.session_stage_rep` — донор дневных партиций на шарде.",
+        "`dds.session_stage_dist` — распределенная поверхность донора.",
+        "`dds.session_v` — публичное представление."
+      ],
+      "keys": [
+        "`client_id` — тот же посетитель, что в событии DDS и карте идентичностей.",
+        "`session_date` — день, который в `dm.daily_traffic_v` называется `report_date`."
+      ],
+      "fill": [
+        "Даг `dds_transform` пересобирает данные прожитых дней при каждом прогоне конвейера.",
+        "Задачи `session.rebuild` и `session.replace` собирают день в доноре и заменяют партицию."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/session.md#user-content-движок-и-наполнение"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/45-dds-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/50-dds-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dds_order",
+      "name": "dds.order_v",
+      "layer": "dds",
+      "order": 2,
+      "streams": [
+        "orders"
+      ],
+      "what": "Заказ в текущем состоянии на языке бизнеса. Артикулы, количества и цены позиций хранятся в согласованных массивах.",
+      "read": "Читайте `dds.order_v`: запрос представления возвращает данные без таблиц и донора партиций.",
+      "parts": [
+        "`dds.order_rep` — реплицируемая таблица заказов на шарде.",
+        "`dds.order_dist` — распределенная поверхность загрузки и диагностики.",
+        "`dds.order_stage_rep` — донор дневных партиций на шарде.",
+        "`dds.order_stage_dist` — распределенная поверхность донора.",
+        "`dds.order_v` — публичное представление."
+      ],
+      "keys": [
+        "`order_id` — тот же заказ, что в ODS, событии покупки и витрине сверки.",
+        "`user_id` — пользователь магазина, который входит в карту идентичностей.",
+        "`item_sku` — тот же артикул, что `sku` в `dic.products`.",
+        "`order_date` — день, который в витринах называется `report_date` или `order_day`."
+      ],
+      "fill": [
+        "Даг `dds_transform` пересобирает изменяемое окно при каждом прогоне конвейера.",
+        "Задачи `order.rebuild` и `order.replace` собирают дни в доноре и заменяют партиции."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/order.md#user-content-движок-и-наполнение"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/45-dds-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/50-dds-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dds_identity",
+      "name": "dds.identity_map_v",
+      "layer": "dds",
+      "order": 3,
+      "streams": [
+        "events",
+        "orders"
+      ],
+      "what": "Известные пары куки трекера и пользователя магазина. Связь появляется после сопоставленной покупки.",
+      "read": "Читайте `dds.identity_map_v`: запрос представления с `FINAL` возвращает актуальные строки полного пересчета.",
+      "parts": [
+        "`dds.identity_map_rep` — реплицируемая таблица версий пар на шарде.",
+        "`dds.identity_map_dist` — распределенная поверхность записи.",
+        "`dds.identity_map_v` — точное публичное представление с `FINAL`."
+      ],
+      "keys": [
+        "`client_id` — кука из события и сессии DDS.",
+        "`user_id` — пользователь магазина из заказа DDS."
+      ],
+      "fill": [
+        "Задача `identity_map` дага `dds_transform` пересчитывает все известные пары после обновления заказов.",
+        "Новая версия полного набора пишется при каждом прогоне; `FINAL` скрывает физические повторы."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/identity.md#user-content-сборка"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/45-dds-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/50-dds-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dm_daily_traffic",
+      "name": "dm.daily_traffic_v",
+      "layer": "dm",
+      "order": 0,
+      "streams": [
+        "events"
+      ],
+      "what": "Дневные счетчики посетителей и известных пользователей после склейки идентичностей.",
+      "read": "Читайте `dm.daily_traffic_v`: запрос представления с `FINAL` возвращает актуальные строки полного пересчета.",
+      "parts": [
+        "`dm.daily_traffic_rep` — реплицируемая таблица версий счетчиков.",
+        "`dm.daily_traffic_dist` — распределенная поверхность записи.",
+        "`dm.daily_traffic_v` — точное публичное представление с `FINAL`."
+      ],
+      "keys": [
+        "`report_date` — тот же день, что `session_date` в сессии DDS."
+      ],
+      "fill": [
+        "Задача `daily_traffic` дага `dm_transform` при каждом прогоне пересчитывает всю историю и записывает новую версию.",
+        "`FINAL` оставляет текущую строку каждого дня."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmdaily_traffic_v"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/55-dm-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/60-dm-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dm_revenue",
+      "name": "dm.revenue_daily_v",
+      "layer": "dm",
+      "order": 1,
+      "streams": [
+        "orders"
+      ],
+      "what": "Дневная выручка, число заказов и единиц товара по категориям.",
+      "read": "Читайте `dm.revenue_daily_v`: это публичное представление готовой дневной витрины.",
+      "parts": [
+        "`dm.revenue_daily_rep` — реплицируемая таблица витрины на шарде.",
+        "`dm.revenue_daily_dist` — распределенная поверхность загрузки.",
+        "`dm.revenue_daily_stage_rep` — донор дневных партиций на шарде.",
+        "`dm.revenue_daily_stage_dist` — распределенная поверхность донора.",
+        "`dm.revenue_daily_v` — публичное представление."
+      ],
+      "keys": [
+        "`report_date` — тот же день, что `order_date` в заказе DDS.",
+        "`product_category` — категория, найденная по `item_sku` заказа и ключу `sku` словаря."
+      ],
+      "fill": [
+        "Даг `dm_transform` пересобирает изменяемое окно заказов при каждом прогоне конвейера.",
+        "Задачи `revenue_daily.rebuild` и `revenue_daily.replace` собирают дни в доноре и заменяют партиции."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmrevenue_daily_v"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/55-dm-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/60-dm-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dm_purchase",
+      "name": "dm.purchase_vs_orders_v",
+      "layer": "dm",
+      "order": 2,
+      "streams": [
+        "events",
+        "orders"
+      ],
+      "what": "Сверка события покупки с заказом магазина. Одна строка показывает совпадение или класс расхождения.",
+      "read": "Читайте `dm.purchase_vs_orders_v`: в результате запроса отсутствующей стороне соответствует `NULL`.",
+      "parts": [
+        "`dm.purchase_vs_orders_rep` — реплицируемая таблица сверки на шарде.",
+        "`dm.purchase_vs_orders_dist` — распределенная поверхность загрузки.",
+        "`dm.purchase_vs_orders_stage_rep` — донор дневных партиций на шарде.",
+        "`dm.purchase_vs_orders_stage_dist` — распределенная поверхность донора.",
+        "`dm.purchase_vs_orders_v` — публичное представление."
+      ],
+      "keys": [
+        "`order_id` — тот же заказ, что `purchase_id[1]` в событии и `order_id` в заказе DDS.",
+        "`order_day` — общий день события покупки и заказа."
+      ],
+      "fill": [
+        "Даг `dm_transform` пересобирает изменяемый хвост обоих источников при каждом прогоне конвейера.",
+        "Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` собирают дни в доноре и заменяют партиции."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmpurchase_vs_orders_v"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/55-dm-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/60-dm-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dm_dq",
+      "name": "dm.dq_summary_v",
+      "layer": "dm",
+      "order": 3,
+      "streams": [
+        "events",
+        "orders"
+      ],
+      "what": "Текущее состояние пяти атомарных проверок качества по дням. История запусков остается в Airflow.",
+      "read": "Читайте `dm.dq_summary_v`: запрос к публичному представлению возвращает последнюю опубликованную сводку дня.",
+      "parts": [
+        "`dm.dq_summary_rep` — реплицируемая таблица опубликованной сводки.",
+        "`dm.dq_summary_dist` — распределенная поверхность чтения и записи.",
+        "`dm.dq_summary_stage_rep` — общий донор дневных партиций.",
+        "`dm.dq_summary_stage_dist` — распределенная поверхность донора.",
+        "`dm.dq_summary_v` — публичное представление."
+      ],
+      "fill": [
+        "Даг `dq_check` при каждом прогоне сначала выполняет все пять проверок, затем заменяет готовые дневные партиции.",
+        "`sessions_vs_reference` — `sql/dq/sessions_vs_reference.sql`.",
+        "`classes_vs_inventory` — `sql/dq/classes_vs_inventory.sql` и паспорт мира.",
+        "`revenue_daily_vs_dds` — `sql/dq/revenue_daily_vs_dds.sql`.",
+        "`purchase_vs_orders_vs_dds` — `sql/dq/purchase_vs_orders_vs_dds.sql`.",
+        "`daily_traffic_vs_dds` — `sql/dq/daily_traffic_vs_dds.sql`."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmdq_summary"
+        },
+        {
+          "label": "DDL таблиц",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/55-dm-tables.sql"
+        },
+        {
+          "label": "DDL представления",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/60-dm-views.sql"
+        }
+      ]
+    },
+    {
+      "id": "dic_products",
+      "name": "dic.products",
+      "layer": "dic",
+      "order": 0,
+      "streams": [
+        "orders"
+      ],
+      "what": "Словарь товаров вне цепочки слоев. По артикулу доступны название, бренд, категория и цена.",
+      "read": "Читайте `dic.products`: у словаря одна поверхность без суффикса.",
+      "parts": [
+        "`dic.products_file` — чтец CSV-каталога из файла репозитория.",
+        "`dic.products` — словарь в памяти поверх подложки."
+      ],
+      "keys": [
+        "`sku` — тот же артикул, что `item_sku` в позиции заказа DDS."
+      ],
+      "fill": [
+        "ClickHouse перечитывает подложку каждые 60–90 секунд по настройке `LIFETIME`."
+      ],
+      "links": [
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-справочники"
+        },
+        {
+          "label": "DDL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/05-dic-catalog.sql"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "hits_to_stg",
+      "from": "kafka_hits",
+      "to": "stg_hits",
+      "mechanism": "materialized_view",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "непрерывно, по мере прихода сообщений",
+      "actor": "Чтец `stg.hits_raw_kafka` и матвью `stg.hits_raw_mv`.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/40-stg-views.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-при%D1%91м-поток-и-его-свойства"
+        }
+      ]
+    },
+    {
+      "id": "stg_to_event",
+      "from": "stg_hits",
+      "to": "ods_event",
+      "mechanism": "materialized_view",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "непрерывно, по мере прихода сообщений",
+      "actor": "Матвью `ods.event_mv` разбирает годные строки.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-при%D1%91м-поток-и-его-свойства"
+        }
+      ]
+    },
+    {
+      "id": "stg_to_event_errors",
+      "from": "stg_hits",
+      "to": "ods_event_errors",
+      "mechanism": "materialized_view",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "непрерывно, по мере прихода сообщений",
+      "actor": "Матвью `ods.event_errors_mv` отбирает строки, которые не прошли строгий прием.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-таблица-ошибок"
+        }
+      ]
+    },
+    {
+      "id": "orders_to_stg",
+      "from": "kafka_orders",
+      "to": "stg_orders",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, раз в модельные сутки",
+      "actor": "Задача `pull_batch` дага `orders_ingest` читает `stg.orders_raw_kafka`.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/stg/orders_raw_load.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-одно-чтение-kafka"
+        }
+      ]
+    },
+    {
+      "id": "stg_to_order",
+      "from": "stg_orders",
+      "to": "ods_order",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, раз в модельные сутки",
+      "actor": "Задача `parse_batch` дага `orders_ingest` пишет годные версии заказа.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ods/order_parse.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-граница-строгого-при%D1%91ма"
+        }
+      ]
+    },
+    {
+      "id": "stg_to_order_errors",
+      "from": "stg_orders",
+      "to": "ods_order_errors",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, раз в модельные сутки",
+      "actor": "Задача `parse_batch` дага `orders_ingest` пишет негодные строки той же пачки.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ods/order_parse.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-граница-строгого-при%D1%91ма"
+        }
+      ]
+    },
+    {
+      "id": "ods_to_dds_event",
+      "from": "ods_event",
+      "to": "dds_event",
+      "mechanism": "view",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "без копии, данные читаются на месте",
+      "actor": "Запрос `dds.event_v` читает данные из `ods.event_v` и переименовывает поля на языке бизнеса.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/50-dds-views.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/event.md#user-content-форма"
+        }
+      ]
+    },
+    {
+      "id": "event_to_session",
+      "from": "dds_event",
+      "to": "dds_session",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dds_transform`",
+      "actor": "Задачи `session.rebuild` и `session.replace` дага `dds_transform`.",
+      "links": [
+        {
+          "label": "SQL сборки",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/session_rebuild.sql"
+        },
+        {
+          "label": "SQL замены",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/session_replace.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/session.md#user-content-движок-и-наполнение"
+        }
+      ]
+    },
+    {
+      "id": "order_to_dds",
+      "from": "ods_order",
+      "to": "dds_order",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dds_transform`",
+      "actor": "Задачи `order.rebuild` и `order.replace` дага `dds_transform`.",
+      "links": [
+        {
+          "label": "SQL сборки",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/order_rebuild.sql"
+        },
+        {
+          "label": "SQL замены",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/order_replace.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/order.md#user-content-движок-и-наполнение"
+        }
+      ]
+    },
+    {
+      "id": "event_to_identity",
+      "from": "dds_event",
+      "to": "dds_identity",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dds_transform`",
+      "actor": "Задача `identity_map` дага `dds_transform` соединяет покупки с заказами.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/identity_map_rebuild.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/identity.md#user-content-сборка"
+        }
+      ]
+    },
+    {
+      "id": "order_to_identity",
+      "from": "dds_order",
+      "to": "dds_identity",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dds_transform`",
+      "actor": "Задача `identity_map` дага `dds_transform` соединяет заказы с покупками.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/identity_map_rebuild.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/identity.md#user-content-сборка"
+        }
+      ]
+    },
+    {
+      "id": "session_to_traffic",
+      "from": "dds_session",
+      "to": "dm_daily_traffic",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dm_transform`",
+      "actor": "Задача `daily_traffic` дага `dm_transform` считает посетителей по сессиям.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/daily_traffic_rebuild.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmdaily_traffic_v"
+        }
+      ]
+    },
+    {
+      "id": "identity_to_traffic",
+      "from": "dds_identity",
+      "to": "dm_daily_traffic",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dm_transform`",
+      "actor": "Задача `daily_traffic` дага `dm_transform` считает известных пользователей по `client_id`.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/daily_traffic_rebuild.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmdaily_traffic_v"
+        }
+      ]
+    },
+    {
+      "id": "order_to_revenue",
+      "from": "dds_order",
+      "to": "dm_revenue",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dm_transform`",
+      "actor": "Задачи `revenue_daily.rebuild` и `revenue_daily.replace` дага `dm_transform`.",
+      "links": [
+        {
+          "label": "SQL сборки",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/revenue_daily_rebuild.sql"
+        },
+        {
+          "label": "SQL замены",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/revenue_daily_replace.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmrevenue_daily_v"
+        }
+      ]
+    },
+    {
+      "id": "products_to_revenue",
+      "from": "dic_products",
+      "to": "dm_revenue",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dm_transform`",
+      "actor": "Даг `dm_transform` получает категорию через `dictGet` по `item_sku`; ключ словаря — `sku`.",
+      "links": [
+        {
+          "label": "SQL",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/revenue_daily_rebuild.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmrevenue_daily_v"
+        }
+      ]
+    },
+    {
+      "id": "event_to_purchase",
+      "from": "dds_event",
+      "to": "dm_purchase",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "events"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dm_transform`",
+      "actor": "Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` дага `dm_transform` читают покупки.",
+      "links": [
+        {
+          "label": "SQL сборки",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/purchase_vs_orders_rebuild.sql"
+        },
+        {
+          "label": "SQL замены",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/purchase_vs_orders_replace.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmpurchase_vs_orders_v"
+        }
+      ]
+    },
+    {
+      "id": "order_to_purchase",
+      "from": "dds_order",
+      "to": "dm_purchase",
+      "mechanism": "airflow_dag",
+      "streams": [
+        "orders"
+      ],
+      "rhythm": "пачкой, при каждом прогоне `dm_transform`",
+      "actor": "Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` дага `dm_transform` читают заказы.",
+      "links": [
+        {
+          "label": "SQL сборки",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/purchase_vs_orders_rebuild.sql"
+        },
+        {
+          "label": "SQL замены",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/purchase_vs_orders_replace.sql"
+        },
+        {
+          "label": "Справочник",
+          "url": "https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmpurchase_vs_orders_v"
+        }
+      ]
+    }
+  ]
+};
+    const NS = "http://www.w3.org/2000/svg";
+    const state = { stream: "all", selected: null, hovered: null };
+    const nodeById = new Map(MAP.nodes.map((node) => [node.id, node]));
+    const mechanismById = new Map(MAP.mechanisms.map((item) => [item.id, item]));
+    const positions = new Map();
+    const svg = document.getElementById("map");
+    const details = document.getElementById("details");
+    function svgElement(name, attributes = {}) {
+      const element = document.createElementNS(NS, name);
+      Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+      return element;
+    }
+    function layerTitle(layerId) { return MAP.layers.find((layer) => layer.id === layerId)?.title ?? MAP.dictionary.title; }
+
+    function appendRichText(parent, value) {
+      value.split("`").forEach((part, index) => {
+        const element = index % 2 ? document.createElement("code") : document.createTextNode(part);
+        if (index % 2) element.textContent = part;
+        parent.append(element);
+      });
+    }
+    function addSection(title, value) {
+      if (!value || (Array.isArray(value) && !value.length)) return;
+      const section = document.createElement("section");
+      section.className = "card-section";
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      section.append(heading);
+      if (Array.isArray(value)) {
+        const list = document.createElement("ul");
+        value.forEach((item) => {
+          const row = document.createElement("li");
+          appendRichText(row, item);
+          list.append(row);
+        });
+        section.append(list);
+      } else {
+        const paragraph = document.createElement("p");
+        appendRichText(paragraph, value);
+        section.append(paragraph);
+      }
+      details.append(section);
+    }
+    function addLinks(links) {
+      if (!links?.length) return;
+      const section = document.createElement("section");
+      section.className = "card-section";
+      const heading = document.createElement("h3");
+      heading.textContent = "Ссылки";
+      const list = document.createElement("ul");
+      links.forEach((item) => {
+        const row = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = item.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = item.label;
+        row.append(link);
+        list.append(row);
+      });
+      section.append(heading, list);
+      details.append(section);
+    }
+    function renderIntro() {
+      details.replaceChildren();
+      const heading = document.createElement("h2");
+      heading.textContent = "Как пользоваться картой";
+      details.append(heading);
+      MAP.intro.forEach((line) => {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = line;
+        details.append(paragraph);
+      });
+      const paragraph = document.createElement("p");
+      const link = document.createElement("a");
+      link.href = MAP.chapter_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Открыть главу «Хранилище и его слои»";
+      paragraph.append(link);
+      details.append(paragraph);
+      const hint = document.createElement("p");
+      hint.className = "hint";
+      hint.textContent = "Повторный щелчок или Esc снимает выделение.";
+      details.append(hint);
+    }
+    function renderNodeCard(node) {
+      details.replaceChildren();
+      const heading = document.createElement("h2");
+      heading.textContent = node.name;
+      const meta = document.createElement("p");
+      meta.className = "meta";
+      meta.textContent = `${layerTitle(node.layer)} — ${node.streams.map((id) => MAP.streams[id]).join(", ")}`;
+      details.append(heading, meta);
+      addSection("Что это", node.what);
+      addSection("Как читать", node.read);
+      addSection("Из чего состоит", node.parts);
+      addSection("Ключи", node.keys);
+      addSection("Кто наполняет и как часто", node.fill);
+      addLinks(node.links);
+    }
+    function renderEdgeCard(edge) {
+      details.replaceChildren();
+      const heading = document.createElement("h2");
+      heading.textContent = `${nodeById.get(edge.from).name} → ${nodeById.get(edge.to).name}`;
+      details.append(heading);
+      addSection("Механизм", mechanismById.get(edge.mechanism).label);
+      addSection("Ритм", edge.rhythm);
+      addSection("Кто именно", edge.actor);
+      addLinks(edge.links);
+    }
+    function layoutMap() {
+      const nodeWidth = 180;
+      const nodeHeight = 48;
+      const columnStep = 250;
+      MAP.layers.forEach((layer, index) => {
+        const x = 20 + index * columnStep;
+        MAP.nodes.filter((node) => node.layer === layer.id).forEach((node) => {
+          positions.set(node.id, { x, y: 88 + node.order * 70, width: nodeWidth, height: nodeHeight });
+        });
+      });
+      const dicX = 20 + ((MAP.layers.findIndex((layer) => layer.id === "dds") + MAP.layers.findIndex((layer) => layer.id === "dm")) * columnStep) / 2 + nodeWidth / 2 - 130;
+      MAP.nodes.filter((node) => node.layer === "dic").forEach((node) => positions.set(node.id, { x: dicX, y: 402 + node.order * 70, width: 260, height: nodeHeight }));
+    }
+    function edgePath(edge, sameColumnIndex) {
+      const source = positions.get(edge.from);
+      const target = positions.get(edge.to);
+      if (nodeById.get(edge.from).layer === "dic") {
+        const x1 = source.x + source.width / 2;
+        const y1 = source.y;
+        const x2 = target.x;
+        const y2 = target.y + target.height / 2;
+        return `M ${x1} ${y1} C ${x1} ${y1 - 38}, ${x1} ${y2 + 48}, ${x2} ${y2}`;
+      }
+      const x1 = source.x + source.width;
+      const y1 = source.y + source.height / 2;
+      if (source.x === target.x) {
+        const route = source.x + source.width + 16 + sameColumnIndex * 18;
+        const y2 = target.y + target.height / 2;
+        return `M ${x1} ${y1} C ${route} ${y1}, ${route} ${y2}, ${x1} ${y2}`;
+      }
+      const x2 = target.x;
+      const y2 = target.y + target.height / 2;
+      const bend = Math.max(18, (x2 - x1) / 2);
+      return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+    }
+
+    function drawMap() {
+      const defs = svgElement("defs");
+      [["arrowhead", "#8c9298"], ["arrowhead-active", "#b54a2a"]].forEach(([id, fill]) => {
+        const marker = svgElement("marker", { id, viewBox: "0 0 8 8", refX: "7", refY: "4", markerWidth: "6", markerHeight: "6", orient: "auto" });
+        marker.append(svgElement("path", { d: "M 0 0 L 8 4 L 0 8 z", fill }));
+        defs.append(marker);
+      });
+      svg.append(defs);
+      MAP.layers.forEach((layer, index) => {
+        const center = 110 + index * 250;
+        svg.append(svgElement("line", { x1: center, y1: 65, x2: center, y2: 377, class: "column-guide" }));
+        const title = svgElement("text", { x: center, y: 28, class: "layer-title" });
+        title.textContent = layer.title;
+        const caption = svgElement("text", { x: center, y: 47, class: "layer-caption" });
+        caption.textContent = layer.caption;
+        svg.append(title, caption);
+      });
+      const dictionaryPosition = positions.get(MAP.nodes.find((node) => node.layer === "dic").id);
+      const zone = svgElement("text", { x: dictionaryPosition.x, y: dictionaryPosition.y - 13, class: "zone-caption" });
+      zone.textContent = MAP.dictionary.caption;
+      svg.append(zone);
+      let sameIndex = 0;
+      MAP.edges.forEach((edge) => {
+        const same = positions.get(edge.from).x === positions.get(edge.to).x;
+        const index = same ? sameIndex++ : 0;
+        const group = svgElement("g", { class: "edge", "data-id": edge.id, tabindex: "0", role: "button", "aria-label": `${nodeById.get(edge.from).name} — ${nodeById.get(edge.to).name}` });
+        const path = edgePath(edge, index);
+        const lineClass = `edge-line ${mechanismById.get(edge.mechanism).line}`;
+        group.append(svgElement("path", { d: path, class: lineClass }), svgElement("path", { d: path, class: "edge-hit" }));
+        bindSelection(group, "edge", edge.id);
+        svg.append(group);
+      });
+      MAP.nodes.forEach((node) => {
+        const position = positions.get(node.id);
+        const group = svgElement("g", { class: "node", "data-id": node.id, tabindex: "0", role: "button", "aria-label": node.name });
+        group.append(svgElement("rect", position));
+        const name = svgElement("text", { x: position.x + position.width / 2, y: position.y + 21 });
+        name.textContent = node.name;
+        const mark = svgElement("text", { x: position.x + position.width / 2, y: position.y + 38, class: "stream-mark" });
+        mark.textContent = node.streams.map((id) => MAP.streams[id]).join(" + ");
+        group.append(name, mark);
+        group.addEventListener("mouseenter", () => { state.hovered = node.id; updateHighlights(); });
+        group.addEventListener("mouseleave", () => { state.hovered = null; updateHighlights(); });
+        bindSelection(group, "node", node.id);
+        svg.append(group);
+      });
+    }
+    function bindSelection(element, type, id) {
+      const choose = () => selectItem(type, id);
+      element.addEventListener("click", choose);
+      element.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
+      });
+    }
+    function findReachability(nodeId) {
+      const nodes = new Set([nodeId]);
+      const edges = new Set();
+      const walk = (start, direction) => {
+        const queue = [start];
+        while (queue.length) {
+          const current = queue.shift();
+          MAP.edges.forEach((edge) => {
+            const matches = direction === "out" ? edge.from === current : edge.to === current;
+            if (!matches) return;
+            edges.add(edge.id);
+            const next = direction === "out" ? edge.to : edge.from;
+            if (!nodes.has(next)) { nodes.add(next); queue.push(next); }
+          });
+        }
+      };
+      walk(nodeId, "in");
+      walk(nodeId, "out");
+      return { nodes, edges };
+    }
+
+    function selectItem(type, id) {
+      const repeated = state.selected?.type === type && state.selected.id === id;
+      state.selected = repeated ? null : { type, id };
+      if (!state.selected) renderIntro();
+      else if (type === "node") renderNodeCard(nodeById.get(id));
+      else renderEdgeCard(MAP.edges.find((edge) => edge.id === id));
+      updateHighlights();
+    }
+
+    function updateHighlights() {
+      let activeNodes = new Set();
+      let activeEdges = new Set();
+      if (state.selected?.type === "node") ({ nodes: activeNodes, edges: activeEdges } = findReachability(state.selected.id));
+      if (state.selected?.type === "edge") {
+        const edge = MAP.edges.find((item) => item.id === state.selected.id);
+        activeNodes = new Set([edge.from, edge.to]);
+        activeEdges = new Set([edge.id]);
+      }
+      const hoverNodes = new Set(state.hovered ? [state.hovered] : []);
+      const hoverEdges = new Set();
+      if (state.hovered) MAP.edges.forEach((edge) => {
+        if (edge.from === state.hovered || edge.to === state.hovered) {
+          hoverEdges.add(edge.id); hoverNodes.add(edge.from); hoverNodes.add(edge.to);
+        }
+      });
+      document.querySelectorAll(".node").forEach((element) => {
+        const node = nodeById.get(element.dataset.id);
+        element.classList.toggle("is-filtered", state.stream !== "all" && !node.streams.includes(state.stream));
+        element.classList.toggle("is-context-dim", Boolean(state.selected) && !activeNodes.has(node.id));
+        element.classList.toggle("is-path", activeNodes.has(node.id));
+        element.classList.toggle("is-hover", hoverNodes.has(node.id));
+        element.classList.toggle("is-selected", state.selected?.type === "node" && state.selected.id === node.id);
+      });
+      document.querySelectorAll(".edge").forEach((element) => {
+        const edge = MAP.edges.find((item) => item.id === element.dataset.id);
+        element.classList.toggle("is-filtered", state.stream !== "all" && !edge.streams.includes(state.stream));
+        element.classList.toggle("is-context-dim", Boolean(state.selected) && !activeEdges.has(edge.id));
+        element.classList.toggle("is-path", activeEdges.has(edge.id));
+        element.classList.toggle("is-hover", hoverEdges.has(edge.id));
+        element.classList.toggle("is-selected", state.selected?.type === "edge" && state.selected.id === edge.id);
+      });
+    }
+
+    function renderControls() {
+      const switcher = document.getElementById("switcher");
+      Object.entries(MAP.streams).forEach(([id, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.setAttribute("aria-pressed", String(id === state.stream));
+        button.addEventListener("click", () => {
+          state.stream = id;
+          switcher.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+          updateHighlights();
+        });
+        switcher.append(button);
+      });
+      const legend = document.getElementById("legend");
+      MAP.mechanisms.forEach((item) => {
+        const row = document.createElement("span");
+        row.className = "legend-item";
+        const line = document.createElement("span");
+        line.className = `legend-line ${item.line}`;
+        const label = document.createElement("span");
+        appendRichText(label, `${item.label} — ${item.rhythm}`);
+        row.append(line, label);
+        legend.append(row);
+      });
+    }
+
+    document.getElementById("page-title").textContent = MAP.title;
+    document.getElementById("lead").textContent = MAP.lead;
+    layoutMap();
+    drawMap();
+    renderControls();
+    renderIntro();
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.selected) selectItem(state.selected.type, state.selected.id);
+    });
+  </script>
+</body>
+</html>

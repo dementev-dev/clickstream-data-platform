@@ -51,9 +51,11 @@ config-test:
 # того своя дверь и свой конфиг. Версия закреплена, потому что лока в корне
 # нет, а форматтер между версиями меняет вывод — иначе проверка однажды
 # покраснела бы сама, без единой правки в репозитории.
+# Проверка рендера быстрая, не требует стенда и ловит устаревший HTML.
 lint:
-	uvx ruff@0.16.1 check dags infra/superset
-	uvx ruff@0.16.1 format --check dags infra/superset
+	uvx ruff@0.16.1 check dags infra/superset docs/handbook/architecture-map
+	uvx ruff@0.16.1 format --check dags infra/superset docs/handbook/architecture-map
+	uv run docs/handbook/architecture-map/render.py --check
 
 # --- Наполнение миром ---
 
