@@ -826,6 +826,7 @@
       ],
       "rhythm": "непрерывно, по мере прихода сообщений",
       "actor": "Чтец `stg.hits_raw_kafka` и матвью `stg.hits_raw_mv`.",
+      "join": "Соединения нет: сообщение кладется строкой целиком.",
       "links": [
         {
           "label": "SQL",
@@ -847,6 +848,7 @@
       ],
       "rhythm": "непрерывно, по мере прихода сообщений",
       "actor": "Матвью `ods.event_mv` разбирает годные строки.",
+      "join": "Соединения нет: матвью разбирает строку в колонки.",
       "links": [
         {
           "label": "SQL",
@@ -868,6 +870,7 @@
       ],
       "rhythm": "непрерывно, по мере прихода сообщений",
       "actor": "Матвью `ods.event_errors_mv` отбирает строки, которые не прошли строгий прием.",
+      "join": "Соединения нет: негодная строка уходит целиком вместе с классом ошибки.",
       "links": [
         {
           "label": "SQL",
@@ -889,6 +892,7 @@
       ],
       "rhythm": "пачкой, раз в модельные сутки",
       "actor": "Задача `pull_batch` дага `orders_ingest` читает `stg.orders_raw_kafka`.",
+      "join": "Соединения нет: сообщение слепка кладется целиком, пачка помечена `_load_id`.",
       "links": [
         {
           "label": "SQL",
@@ -910,6 +914,7 @@
       ],
       "rhythm": "пачкой, раз в модельные сутки",
       "actor": "Задача `parse_batch` дага `orders_ingest` пишет годные версии заказа.",
+      "join": "Соединения нет: строка разбирается в колонки, версия задается `snapshot_date`.",
       "links": [
         {
           "label": "SQL",
@@ -931,6 +936,7 @@
       ],
       "rhythm": "пачкой, раз в модельные сутки",
       "actor": "Задача `parse_batch` дага `orders_ingest` пишет негодные строки той же пачки.",
+      "join": "Соединения нет: негодная строка пачки уходит целиком.",
       "links": [
         {
           "label": "SQL",
@@ -952,6 +958,7 @@
       ],
       "rhythm": "без копии, данные читаются на месте",
       "actor": "Запрос `dds.event_v` читает данные из `ods.event_v` и переименовывает поля на языке бизнеса.",
+      "join": "Соединения нет: представление переименовывает колонки той же строки.",
       "links": [
         {
           "label": "SQL",
@@ -973,6 +980,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dds_transform`",
       "actor": "Задачи `session.rebuild` и `session.replace` дага `dds_transform`.",
+      "join": "События одной `client_id` за `event_date` режутся по паузам; `session_id` - `cityHash64(client_id, min(event_time))`.",
       "links": [
         {
           "label": "SQL сборки",
@@ -998,6 +1006,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dds_transform`",
       "actor": "Задачи `order.rebuild` и `order.replace` дага `dds_transform`.",
+      "join": "Соединения нет: из заказа берутся поля и позиции, `order_date` выводится из `created_at`.",
       "links": [
         {
           "label": "SQL сборки",
@@ -1023,6 +1032,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dds_transform`",
       "actor": "Задача `identity_map` дага `dds_transform` соединяет покупки с заказами.",
+      "join": "Строки покупки и заказа соединяются по `purchase_id[1] = order_id`.",
       "links": [
         {
           "label": "SQL",
@@ -1044,6 +1054,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dds_transform`",
       "actor": "Задача `identity_map` дага `dds_transform` соединяет заказы с покупками.",
+      "join": "Строки заказа и покупки соединяются по `order_id = purchase_id[1]`; берется `user_id`.",
       "links": [
         {
           "label": "SQL",
@@ -1065,6 +1076,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dm_transform`",
       "actor": "Задача `daily_traffic` дага `dm_transform` считает посетителей по сессиям.",
+      "join": "Соединения нет: сессии группируются по `session_date`, который становится `report_date`.",
       "links": [
         {
           "label": "SQL",
@@ -1086,6 +1098,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dm_transform`",
       "actor": "Задача `daily_traffic` дага `dm_transform` считает известных пользователей по `client_id`.",
+      "join": "GLOBAL LEFT JOIN по `client_id`; сессии без пары остаются в витрине.",
       "links": [
         {
           "label": "SQL",
@@ -1107,6 +1120,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dm_transform`",
       "actor": "Задачи `revenue_daily.rebuild` и `revenue_daily.replace` дага `dm_transform`.",
+      "join": "Соединения таблиц нет: ARRAY JOIN раскрывает `item_sku`, `item_quantity`, `item_price`; `order_date` становится `report_date`.",
       "links": [
         {
           "label": "SQL сборки",
@@ -1132,6 +1146,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dm_transform`",
       "actor": "Даг `dm_transform` получает категорию через `dictGet` по `item_sku`; ключ словаря — `sku`.",
+      "join": "Категория читается через `dictGet` по `item_sku`; ключ справочника - `sku`.",
       "links": [
         {
           "label": "SQL",
@@ -1153,6 +1168,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dm_transform`",
       "actor": "Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` дага `dm_transform` читают покупки.",
+      "join": "Покупки группируются по `purchase_id[1]` как `purchase_order_id`; `event_date` становится `purchase_day`, затем GLOBAL FULL OUTER JOIN `purchase_order_id = backend_order_id`.",
       "links": [
         {
           "label": "SQL сборки",
@@ -1178,6 +1194,7 @@
       ],
       "rhythm": "пачкой, при каждом прогоне `dm_transform`",
       "actor": "Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` дага `dm_transform` читают заказы.",
+      "join": "GLOBAL FULL OUTER JOIN: `purchase_order_id = backend_order_id` (`purchase_id[1]` и `order_id`); отсутствующая сторона получает NULL.",
       "links": [
         {
           "label": "SQL сборки",
@@ -1304,6 +1321,7 @@
       addSection("Механизм", mechanismById.get(edge.mechanism).label);
       addSection("Ритм", edge.rhythm);
       addSection("Кто именно", edge.actor);
+      addSection("Как соединяет", edge.join);
       addLinks(edge.links);
     }
     function layoutMap() {
