@@ -6,7 +6,7 @@
 ## Сначала прочитать
 
 - [«Немного Superset»](../handbook/superset.md);
-- [задание 3: `dm.session_overview`](session-overview.md).
+- [задание 3: `dm.session_overview`](1-3-session-overview.md).
 
 ## Роль графика
 
