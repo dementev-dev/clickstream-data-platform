@@ -109,28 +109,28 @@ def homework_check():
     """Дать отдельный результат самопроверки по каждой домашней витрине."""
     check_mart.override(task_id="events_enriched")(
         "dm.events_enriched_v",
-        "docs/labs/events-enriched.md",
+        "docs/labs/1-1-events-enriched.md",
         "events_enriched_vs_dds.sql",
         "events_enriched_scope.sql",
     )
     check_mart.override(task_id="top_pages_daily")(
         "dm.top_pages_daily_v",
-        "docs/labs/top-pages-daily.md",
+        "docs/labs/1-2-top-pages-daily.md",
         "top_pages_daily_vs_dds.sql",
     )
     check_mart.override(task_id="session_overview")(
         "dm.session_overview_v",
-        "docs/labs/session-overview.md",
+        "docs/labs/1-3-session-overview.md",
         "session_overview_vs_dds.sql",
     )
     check_mart.override(task_id="dq_errors_daily")(
         "dm.dq_errors_daily_v",
-        "docs/labs/dq-errors-daily.md",
+        "docs/labs/1-4-dq-errors-daily.md",
         "dq_errors_daily_vs_ods.sql",
     )
     check_mart.override(task_id="utm_effectiveness")(
         "dm.utm_effectiveness_v",
-        "docs/labs/utm-effectiveness.md",
+        "docs/labs/1-5-utm-effectiveness.md",
         "utm_effectiveness_vs_dds.sql",
     )
 
