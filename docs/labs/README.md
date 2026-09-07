@@ -122,8 +122,9 @@ DM](../architecture/dm.md).
 
 ### Superset и BI
 
-Открывается после ступени 2. [Свой дашборд в Superset](superset-dashboard.md):
-свои объекты BI живут отдельно от стендовых.
+Открывается после ступени 2.
+[Свой дашборд в Superset](optional/superset-dashboard.md): свои объекты BI живут
+отдельно от стендовых.
 
 ### Инженерия стенда
 
