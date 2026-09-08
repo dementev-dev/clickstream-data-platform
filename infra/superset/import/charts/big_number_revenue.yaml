@@ -1,0 +1,19 @@
+slice_name: Выручка, ₽
+description: null
+certified_by: null
+certification_details: null
+viz_type: big_number_total
+params:
+  viz_type: big_number_total
+  metric: revenue
+  adhoc_filters:
+  - expressionType: SIMPLE
+    subject: report_date
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    clause: WHERE
+  header_font_size: 0.3
+cache_timeout: null
+uuid: 19600000-0000-4000-8000-000000000104
+version: 1.0.0
+dataset_uuid: 19600000-0000-4000-8000-000000000001

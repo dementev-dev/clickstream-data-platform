@@ -6,9 +6,9 @@ viz_type: pivot_table_v2
 params:
   viz_type: pivot_table_v2
   groupbyRows:
-  - order_day
-  groupbyColumns:
   - mismatch_class
+  groupbyColumns:
+  - order_day
   metrics:
   - order_count
   adhoc_filters:
@@ -23,8 +23,7 @@ params:
   colOrder: key_a_to_z
   order_desc: true
   row_limit: 10000
-  valueFormat: SMART_NUMBER
-  date_format: smart_date
+  date_format: '%d.%m.%Y'
 cache_timeout: null
 uuid: 19600000-0000-4000-8000-000000000102
 version: 1.0.0

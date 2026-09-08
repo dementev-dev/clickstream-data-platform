@@ -36,6 +36,15 @@ metrics:
   currency: null
   extra: null
   warning_text: null
+- metric_name: known_share
+  verbose_name: Доля известных
+  metric_type: null
+  expression: SUM(known_users) / nullIf(SUM(visitors), 0)
+  description: null
+  d3format: .1%
+  currency: null
+  extra: null
+  warning_text: null
 columns:
 - column_name: _load_ts
   verbose_name: Время загрузки

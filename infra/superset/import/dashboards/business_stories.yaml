@@ -19,9 +19,79 @@ position:
     parents:
     - ROOT_ID
     children:
+    - ROW-kpi
     - ROW-revenue
     - ROW-pvo
     - ROW-traffic
+  ROW-kpi:
+    id: ROW-kpi
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    children:
+    - CHART-kpi-revenue
+    - CHART-kpi-orders
+    - CHART-kpi-avg-check
+    - CHART-kpi-visitors
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-kpi-revenue:
+    id: CHART-kpi-revenue
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-kpi
+    children: []
+    meta:
+      chartId: 4
+      height: 20
+      width: 3
+      sliceName: Выручка, ₽
+      uuid: 19600000-0000-4000-8000-000000000104
+  CHART-kpi-orders:
+    id: CHART-kpi-orders
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-kpi
+    children: []
+    meta:
+      chartId: 5
+      height: 20
+      width: 3
+      sliceName: Заказы
+      uuid: 19600000-0000-4000-8000-000000000105
+  CHART-kpi-avg-check:
+    id: CHART-kpi-avg-check
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-kpi
+    children: []
+    meta:
+      chartId: 6
+      height: 20
+      width: 3
+      sliceName: Средний чек, ₽
+      uuid: 19600000-0000-4000-8000-000000000106
+  CHART-kpi-visitors:
+    id: CHART-kpi-visitors
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-kpi
+    children: []
+    meta:
+      chartId: 7
+      height: 20
+      width: 3
+      sliceName: Посетители
+      uuid: 19600000-0000-4000-8000-000000000107
   ROW-revenue:
     id: ROW-revenue
     type: ROW
@@ -30,6 +100,7 @@ position:
     - GRID_ID
     children:
     - CHART-revenue
+    - CHART-revenue-share
     meta:
       background: BACKGROUND_TRANSPARENT
   CHART-revenue:
@@ -43,9 +114,23 @@ position:
     meta:
       chartId: 1
       height: 50
-      width: 12
-      sliceName: Выручка по дням и категориям
+      width: 8
+      sliceName: Выручка по дням и категориям, ₽
       uuid: 19600000-0000-4000-8000-000000000101
+  CHART-revenue-share:
+    id: CHART-revenue-share
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-revenue
+    children: []
+    meta:
+      chartId: 8
+      height: 50
+      width: 4
+      sliceName: Доля категорий в выручке
+      uuid: 19600000-0000-4000-8000-000000000108
   ROW-pvo:
     id: ROW-pvo
     type: ROW
@@ -66,7 +151,7 @@ position:
     children: []
     meta:
       chartId: 2
-      height: 50
+      height: 44
       width: 12
       sliceName: Сверка purchase и заказов
       uuid: 19600000-0000-4000-8000-000000000102
@@ -78,6 +163,7 @@ position:
     - GRID_ID
     children:
     - CHART-traffic
+    - CHART-known-share
     meta:
       background: BACKGROUND_TRANSPARENT
   CHART-traffic:
@@ -91,15 +177,57 @@ position:
     meta:
       chartId: 3
       height: 50
-      width: 12
+      width: 6
       sliceName: Посетители и известные пользователи
       uuid: 19600000-0000-4000-8000-000000000103
+  CHART-known-share:
+    id: CHART-known-share
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-traffic
+    children: []
+    meta:
+      chartId: 9
+      height: 50
+      width: 6
+      sliceName: Доля известных пользователей
+      uuid: 19600000-0000-4000-8000-000000000109
 metadata:
   color_scheme: supersetColors
+  label_colors:
+    Товары для дома: '#1FA8C9'
+    Текстиль: '#454E7C'
+    Посуда: '#5AC189'
+    Бытовая техника: '#FF7F44'
+    Детские товары: '#E04355'
+    Одежда и обувь: '#A868B7'
+    visitors: '#1FA8C9'
+    known_users: '#454E7C'
+    known_share: '#454E7C'
   cross_filters_enabled: false
   chart_configuration: {}
   expanded_slices: {}
   default_filters: '{}'
-  native_filter_configuration: []
+  native_filter_configuration:
+  - id: NATIVE_FILTER-period
+    name: Период
+    filterType: filter_time
+    type: NATIVE_FILTER
+    targets:
+    - {}
+    controlValues:
+      enableEmptyFilter: false
+    defaultDataMask:
+      extraFormData: {}
+      filterState: {}
+      ownState: {}
+    cascadeParentIds: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    description: ''
 theme_uuid: null
 version: 1.0.0

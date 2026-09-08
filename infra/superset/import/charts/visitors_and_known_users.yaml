@@ -17,12 +17,16 @@ params:
     comparator: No filter
     clause: WHERE
   row_limit: 10000
-  seriesType: echarts_timeseries_line
+  seriesType: line
   show_legend: true
+  legendOrientation: bottom
   rich_tooltip: true
   show_value: false
+  markerEnabled: true
+  markerSize: 6
   y_axis_format: ',d'
-  x_axis_time_format: smart_date
+  x_axis_time_format: '%d.%m'
+  tooltipTimeFormat: '%d.%m.%Y'
 cache_timeout: null
 uuid: 19600000-0000-4000-8000-000000000103
 version: 1.0.0

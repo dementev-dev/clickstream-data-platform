@@ -23,10 +23,26 @@ metrics:
   metric_type: null
   expression: SUM(revenue)
   description: null
-  d3format: ',.2f'
-  currency:
-    symbol: ₽
-    symbolPosition: suffix
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: orders
+  verbose_name: Заказы
+  metric_type: null
+  expression: SUM(orders)
+  description: null
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: avg_check
+  verbose_name: Средний чек
+  metric_type: null
+  expression: SUM(revenue) / nullIf(SUM(orders), 0)
+  description: null
+  d3format: ',d'
+  currency: null
   extra: null
   warning_text: null
 columns:
@@ -44,7 +60,7 @@ columns:
   datetime_format: null
   extra: null
 - column_name: aov
-  verbose_name: Средний чек
+  verbose_name: Средний чек за день и категорию
   is_dttm: false
   is_active: true
   type: DECIMAL(18, 2)
