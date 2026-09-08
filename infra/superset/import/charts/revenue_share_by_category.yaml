@@ -1,0 +1,29 @@
+slice_name: Доля категорий в выручке
+description: null
+certified_by: null
+certification_details: null
+viz_type: pie
+params:
+  viz_type: pie
+  groupby:
+  - product_category
+  metric: revenue
+  adhoc_filters:
+  - expressionType: SIMPLE
+    subject: report_date
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    clause: WHERE
+  row_limit: 10000
+  sort_by_metric: true
+  donut: true
+  innerRadius: 30
+  outerRadius: 70
+  show_labels: true
+  labels_outside: false
+  label_type: percent
+  show_legend: false
+cache_timeout: null
+uuid: 19600000-0000-4000-8000-000000000108
+version: 1.0.0
+dataset_uuid: 19600000-0000-4000-8000-000000000001

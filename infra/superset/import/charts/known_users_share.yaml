@@ -1,15 +1,14 @@
-slice_name: Выручка по дням и категориям, ₽
+slice_name: Доля известных пользователей
 description: null
 certified_by: null
 certification_details: null
-viz_type: echarts_timeseries_bar
+viz_type: echarts_timeseries_line
 params:
-  viz_type: echarts_timeseries_bar
+  viz_type: echarts_timeseries_line
   x_axis: report_date
   metrics:
-  - revenue
-  groupby:
-  - product_category
+  - known_share
+  groupby: []
   adhoc_filters:
   - expressionType: SIMPLE
     subject: report_date
@@ -17,17 +16,16 @@ params:
     comparator: No filter
     clause: WHERE
   row_limit: 10000
-  stack: Stack
-  orientation: vertical
-  show_legend: true
-  legendType: plain
-  legendOrientation: bottom
+  seriesType: line
+  show_legend: false
   rich_tooltip: true
   show_value: false
-  y_axis_format: ',d'
+  markerEnabled: true
+  markerSize: 6
+  y_axis_format: .1%
   x_axis_time_format: '%d.%m'
   tooltipTimeFormat: '%d.%m.%Y'
 cache_timeout: null
-uuid: 19600000-0000-4000-8000-000000000101
+uuid: 19600000-0000-4000-8000-000000000109
 version: 1.0.0
-dataset_uuid: 19600000-0000-4000-8000-000000000001
+dataset_uuid: 19600000-0000-4000-8000-000000000003
