@@ -1,7 +1,9 @@
--- DM: сборка выручки за выбранный диапазон в донор.
--- DROP PARTITION ALL очищает донор на каждом узле. Вставка ниже дает
--- одну строку на день заказа и категорию товара: только оплаченные заказы.
--- ARRAY JOIN разворачивает согласованные позиции трех массивов вместе.
+-- DM: расчет выручки за дни от first_day до last_day включительно.
+-- DROP PARTITION ALL очищает промежуточную revenue_daily_stage_rep.
+-- Затем INSERT записывает по одной строке итогов на день и категорию товара.
+-- Основная revenue_daily_rep остается прежней до revenue_daily_replace.sql.
+-- В расчет входят только оплаченные заказы. ARRAY JOIN превращает артикул,
+-- количество и цену с одним индексом в массивах в одну строку позиции заказа.
 -- Причина выбора DROP вместо TRUNCATE — в sql/dds/order_rebuild.sql.
 ALTER TABLE dm.revenue_daily_stage_rep ON CLUSTER clickstream_cluster
 DROP PARTITION ALL;
