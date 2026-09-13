@@ -243,9 +243,9 @@
       details.append(heading, meta);
       addSection("Что это", node.what);
       addSection("Как читать", node.read);
-      addSection("Из чего состоит", node.parts);
-      addSection("Ключи", node.keys);
-      addSection("Кто наполняет и как часто", node.fill);
+      addSection("Связанные таблицы и представления", node.parts);
+      addSection("Как связать данные", node.keys);
+      addSection("Как обновляются данные", node.fill);
       addLinks(node.links);
     }
     function renderEdgeCard(edge) {
@@ -253,10 +253,10 @@
       const heading = document.createElement("h2");
       heading.textContent = `${nodeById.get(edge.from).name} → ${nodeById.get(edge.to).name}`;
       details.append(heading);
-      addSection("Механизм", mechanismById.get(edge.mechanism).label);
-      addSection("Ритм", edge.rhythm);
-      addSection("Кто именно", edge.actor);
-      addSection("Как соединяет", edge.join);
+      addSection("Способ обработки", mechanismById.get(edge.mechanism).label);
+      addSection("Когда выполняется", edge.rhythm);
+      addSection("Что выполняет обработку", edge.actor);
+      addSection("Что происходит с данными", edge.join);
       addLinks(edge.links);
     }
     function layoutMap() {

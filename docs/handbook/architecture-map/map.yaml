@@ -1,13 +1,12 @@
 title: Карта слоев хранилища
-lead: Проследите, как один смысл меняет имя и поверхность между слоями.
+lead: Проследите путь событий и заказов от Kafka до отчетов.
 chapter_url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/handbook/storage-layers.md#user-content-хранилище-и-его-слои
 intro:
-  - Эта карта показывает путь событий и заказов от Kafka до витрин DM.
-  - Щелкните по узлу, чтобы увидеть его назначение, устройство и ключи.
-  - Щелкните по стрелке, чтобы узнать, кто и каким запросом переносит данные.
-  - Когда вы выбираете узел, карта подсвечивает все пути к нему и от него.
-  - Переключатель потока приглушает другую часть карты, но не меняет раскладку.
-  - Сначала прочитайте главу «Хранилище и его слои», затем вернитесь к карте и рассмотрите объекты.
+  - Выберите объект, чтобы узнать, что он хранит, как его читать и откуда в него поступают данные.
+  - Выберите стрелку, чтобы посмотреть способ обработки и открыть SQL-запрос.
+  - Для выбранного объекта подсвечиваются все пути, по которым данные поступают в него и используются дальше.
+  - Кнопки «События» и «Заказы» выделяют нужный поток. Остальные объекты остаются на месте, но становятся бледнее.
+  - Если вы впервые знакомитесь со слоями хранилища, начните с главы по ссылке ниже.
 
 streams:
   all: Все
@@ -16,38 +15,38 @@ streams:
 
 dictionary:
   title: Словарь
-  caption: 'сбоку цепочки: справочники'
+  caption: справочные данные
 
 layers:
   - id: kafka
     title: Kafka
-    caption: откуда приходит
+    caption: сообщения источников
   - id: stg
     title: STG
-    caption: как поступило
+    caption: исходные сообщения
   - id: ods
     title: ODS
-    caption: язык источника
+    caption: данные разобраны по полям
   - id: dds
     title: DDS
-    caption: язык бизнеса
+    caption: события, заказы и сессии
   - id: dm
     title: DM
-    caption: данные для дашбордов
+    caption: витрины для отчетов
 
 mechanisms:
   - id: materialized_view
-    label: матвью
+    label: материализованное представление
     line: solid
     rhythm: непрерывно, по мере прихода сообщений
   - id: airflow_dag
     label: даг Airflow
     line: dashed
-    rhythm: 'пачкой: раз в модельные сутки (`orders_ingest`) или на каждом прогоне конвейера'
+    rhythm: 'пакетно: раз в модельные сутки (`orders_ingest`) или при каждом запуске конвейера'
   - id: view
     label: представление
     line: dotted
-    rhythm: без копии, данные читаются на месте
+    rhythm: при запросе к представлению, без копирования данных
 
 nodes:
   - id: kafka_hits
@@ -56,9 +55,9 @@ nodes:
     order: 0
     streams: [events]
     what: Топик Kafka с событиями кликстрима. Каждое сообщение содержит одно событие.
-    read: 'Топик напрямую не читают: таблица `stg.hits_raw_kafka` забирает сообщения из топика. Для данных событий используйте `stg.hits_raw_dist`.'
+    read: "Для просмотра загруженных сообщений используйте `stg.hits_raw_dist`. Таблица `stg.hits_raw_kafka` служит для приема из топика."
     fill:
-      - Источник событий пишет сообщения в топик в темпе выбранного режима мира.
+      - "Генератор отправляет события без пауз в пакетном режиме или постепенно в живом режиме."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-при%D1%91м-поток-и-его-свойства
@@ -70,10 +69,10 @@ nodes:
     layer: kafka
     order: 1
     streams: [orders]
-    what: Топик Kafka со слепками заказов магазина. После модельного дня приходит снимок изменяемого окна.
-    read: 'Топик напрямую не читают: таблица `stg.orders_raw_kafka` забирает сообщения из топика. Для заказов используйте `stg.orders_raw_dist`.'
+    what: "Топик Kafka с дневными выгрузками заказов — слепками. Каждый слепок содержит состояние заказов за последние семь модельных дней."
+    read: "Для просмотра загруженных сообщений используйте `stg.orders_raw_dist`. Таблица `stg.orders_raw_kafka` служит для приема из топика."
     fill:
-      - Источник заказов публикует слепок пачкой после каждого модельного дня.
+      - "После генерации событий дня D источник отправляет слепок заказов за предыдущий день D−1."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-поток-данных
@@ -85,22 +84,22 @@ nodes:
     layer: stg
     order: 0
     streams: [events]
-    what: Сырая строка события и метаданные доставки. STG сохраняет сообщение без разбора.
+    what: "Исходное сообщение события и сведения о его доставке из Kafka. Содержимое сохраняется целой строкой, без разбора на поля."
     read: 'Читайте `_dist`: у STG нет представления `_v`, а распределенная таблица показывает оба шарда.'
     parts:
-      - '`stg.hits_raw_kafka` — чтец топика `hits`.'
-      - '`stg.hits_raw_rep` — реплицируемая таблица на шарде.'
-      - '`stg.hits_raw_dist` — распределенная поверхность записи и чтения.'
-      - '`stg.hits_raw_mv` — матвью приема сообщений из чтеца.'
+      - "`stg.hits_raw_kafka` — таблица для чтения сообщений топика `hits`."
+      - "`stg.hits_raw_rep` — реплицируемая таблица на шарде."
+      - "`stg.hits_raw_dist` — распределенная таблица для записи и чтения."
+      - "`stg.hits_raw_mv` — материализованное представление, которое записывает сообщения из Kafka в STG."
     fill:
       - '`stg.hits_raw_mv` пишет непрерывно, по мере прихода сообщений.'
-      - Сырые строки живут трое суток реального времени плюс хвост до суток.
+      - Строки хранятся не менее трех суток от загрузки. Удаление целыми частями таблицы добавляет до суток к этому сроку; оно выполняется при очередном слиянии по TTL.
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-при%D1%91м-поток-и-его-свойства
       - label: DDL таблиц
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/10-stg-tables.sql
-      - label: DDL матвью
+      - label: DDL материализованного представления
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/40-stg-views.sql
 
   - id: stg_orders
@@ -108,15 +107,15 @@ nodes:
     layer: stg
     order: 1
     streams: [orders]
-    what: Сырые строки слепка заказов, метаданные доставки и идентификатор пачки `_load_id`.
+    what: "Исходные строки выгрузки заказов, сведения о доставке и идентификатор загруженной партии `_load_id`."
     read: 'Читайте `_dist`: у STG нет представления `_v`, а распределенная таблица показывает оба шарда.'
     parts:
-      - '`stg.orders_raw_kafka` — чтец топика `orders` на первой ноде.'
-      - '`stg.orders_raw_rep` — реплицируемая таблица на шарде.'
-      - '`stg.orders_raw_dist` — распределенная поверхность записи и чтения.'
+      - "`stg.orders_raw_kafka` — таблица для чтения топика `orders` на первом узле."
+      - "`stg.orders_raw_rep` — реплицируемая таблица на шарде."
+      - "`stg.orders_raw_dist` — распределенная таблица для записи и чтения."
     fill:
-      - Задача `pull_batch` дага `orders_ingest` забирает слепок пачкой раз в модельные сутки.
-      - Сырые строки живут трое суток реального времени плюс хвост до суток.
+      - Задача `pull_batch` дага `orders_ingest` загружает слепок раз в модельные сутки.
+      - Строки хранятся не менее трех суток от загрузки. Удаление целыми частями таблицы добавляет до суток к этому сроку; оно выполняется при очередном слиянии по TTL.
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/orders/ingestion.md#user-content-поток-данных
@@ -128,13 +127,13 @@ nodes:
     layer: ods
     order: 0
     streams: [events]
-    what: Типизированное широкое событие с именами полей источника. Запрос представления с `FINAL` возвращает актуальную версию события.
-    read: 'Читайте `ods.event_v`: запрос представления с `FINAL` возвращает актуальные строки вместо физических версий.'
+    what: "События, разобранные на колонки с типами данных. Имена полей сохранены как в источнике."
+    read: "Читайте `ods.event_v`: представление использует `FINAL` и возвращает последнюю версию каждого события."
     parts:
       - '`ods.event_rep` — реплицируемая таблица версий события на шарде.'
-      - '`ods.event_dist` — распределенная поверхность записи и диагностики.'
+      - '`ods.event_dist` — распределенная таблица записи и диагностики.'
       - '`ods.event_v` — представление актуального состояния с `FINAL`.'
-      - '`ods.event_mv` — матвью разбора годных строк STG.'
+      - '`ods.event_mv` — материализованное представление для разбора сообщений STG без ошибок.'
     keys:
       - '`WatchID` — тот же идентификатор, что `event_id` в DDS.'
       - '`ClientID` — тот же посетитель, что `client_id` в DDS.'
@@ -155,21 +154,21 @@ nodes:
     layer: ods
     order: 1
     streams: [events]
-    what: Сырые события, которые не прошли строгий прием, с классом ошибки и метаданными доставки.
+    what: "Сообщения событий, которые не удалось разобрать по правилам ODS. Сохранены исходная строка, класс ошибки и сведения о доставке."
     read: 'Читайте `_dist`: представления `_v` нет, а распределенная таблица показывает ошибки с обоих шардов.'
     parts:
       - '`ods.event_errors_rep` — реплицируемая таблица ошибок на шарде.'
-      - '`ods.event_errors_dist` — распределенная поверхность чтения и записи.'
-      - '`ods.event_errors_mv` — матвью, которое отбирает негодные строки STG.'
+      - '`ods.event_errors_dist` — распределенная таблица чтения и записи.'
+      - '`ods.event_errors_mv` — материализованное представление для отбора сообщений STG с ошибками.'
     fill:
       - '`ods.event_errors_mv` пишет непрерывно, по мере записи в STG.'
-      - Ошибки живут один месяц и не останавливают прием годных событий.
+      - Ошибки хранятся один месяц. Остальные события продолжают загружаться.
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-таблица-ошибок
       - label: DDL таблиц
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/20-ods-tables.sql
-      - label: DDL матвью
+      - label: DDL материализованного представления
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql
 
   - id: ods_order
@@ -177,17 +176,17 @@ nodes:
     layer: ods
     order: 2
     streams: [orders]
-    what: Текущая версия заказа на языке источника. Позиции пока остаются сырым фрагментом JSON.
+    what: "Последняя загруженная версия заказа с именами полей из источника. Состав заказа пока хранится как фрагмент JSON."
     read: 'Читайте `ods.order_v`: запрос представления с `FINAL` возвращает последнюю версию по `snapshot_date`.'
     parts:
       - '`ods.order_rep` — реплицируемая таблица версий заказа на шарде.'
-      - '`ods.order_dist` — распределенная поверхность записи и диагностики.'
+      - '`ods.order_dist` — распределенная таблица записи и диагностики.'
       - '`ods.order_v` — представление текущего состояния с `FINAL`.'
     keys:
       - '`order_id` — тот же заказ в `dds.order_v` и `dm.purchase_vs_orders_v`.'
       - '`user_id` — пользователь магазина, который переходит в заказ DDS.'
     fill:
-      - Задача `parse_batch` дага `orders_ingest` разбирает пачку раз в модельные сутки.
+      - Задача `parse_batch` дага `orders_ingest` разбирает загруженный слепок раз в модельные сутки.
       - '`ReplacingMergeTree(snapshot_date)` оставляет версию из последнего принятого слепка.'
     links:
       - label: Справочник
@@ -202,14 +201,14 @@ nodes:
     layer: ods
     order: 3
     streams: [orders]
-    what: Сырые строки слепка, которые не прошли строгий прием, с классом ошибки и `_load_id`.
+    what: "Строки выгрузки заказов, которые не удалось разобрать по правилам ODS. Сохранены исходная строка, класс ошибки и `_load_id`."
     read: 'Читайте `_dist`: представления `_v` нет, а распределенная таблица показывает ошибки с обоих шардов.'
     parts:
       - '`ods.order_errors_rep` — реплицируемая таблица ошибок на шарде.'
-      - '`ods.order_errors_dist` — распределенная поверхность чтения и записи.'
+      - '`ods.order_errors_dist` — распределенная таблица чтения и записи.'
     fill:
-      - Задача `parse_batch` дага `orders_ingest` пишет ошибки из той же пачки, что и годные заказы.
-      - Ошибки живут один месяц и не останавливают прием годных заказов.
+      - Задача `parse_batch` дага `orders_ingest` сохраняет строки с ошибками при разборе той же выгрузки, из которой загружаются заказы.
+      - Ошибки хранятся один месяц. Остальные заказы продолжают загружаться.
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-таблица-ошибок
@@ -221,8 +220,8 @@ nodes:
     layer: dds
     order: 0
     streams: [events]
-    what: Публичное представление события на языке бизнеса. Его запрос переименовывает поля и расшифровывает категорию устройства.
-    read: 'Читайте `dds.event_v`: запрос представления возвращает явный список колонок DDS.'
+    what: "События с названиями полей, принятыми в DDS. Например, `WatchID` переименован в `event_id`, а числовой код устройства заменен названием категории."
+    read: "Читайте `dds.event_v`: представление возвращает явно перечисленные колонки DDS."
     parts:
       - '`dds.event_v` — только представление над `ods.event_v`; своей таблицы в DDS нет.'
     keys:
@@ -231,7 +230,7 @@ nodes:
       - '`event_date` — тот же день, что `EventDate` в ODS.'
       - '`purchase_id[1]` — тот же заказ, что `order_id` в DDS и DM.'
     fill:
-      - Данные для `dds.event_v` читаются из актуальных событий ODS без копии и отдельного расписания.
+      - "При запросе к `dds.event_v` данные читаются из актуальных событий ODS. Отдельная загрузка в DDS не нужна."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/event.md#user-content-форма
@@ -243,20 +242,20 @@ nodes:
     layer: dds
     order: 1
     streams: [events]
-    what: Сессия, которую запрос дага `dds_transform` собирает из последовательных событий одной куки. В источнике готовой сессии нет.
-    read: 'Читайте `dds.session_v`: запрос представления возвращает деловые и служебные колонки.'
+    what: "Сессии, рассчитанные дагом `dds_transform` по событиям посетителя. Новая сессия начинается после паузы дольше 30 минут или при смене модельной даты."
+    read: "Читайте `dds.session_v`: здесь есть начало, конец, длительность сессии, показатели событий и служебные поля загрузки."
     parts:
       - '`dds.session_rep` — реплицируемая таблица сессий на шарде.'
-      - '`dds.session_dist` — распределенная поверхность загрузки и диагностики.'
-      - '`dds.session_stage_rep` — донор дневных партиций на шарде.'
-      - '`dds.session_stage_dist` — распределенная поверхность донора.'
-      - '`dds.session_v` — публичное представление.'
+      - '`dds.session_dist` — распределенная таблица загрузки и диагностики.'
+      - '`dds.session_stage_rep` — промежуточная таблица для пересчета данных по дням на шарде.'
+      - '`dds.session_stage_dist` — распределенная таблица для записи и чтения промежуточных данных.'
+      - '`dds.session_v` — представление для чтения готовых данных.'
     keys:
       - '`client_id` — тот же посетитель, что в событии DDS и карте идентичностей.'
       - '`session_date` — день, который в `dm.daily_traffic_v` называется `report_date`.'
     fill:
-      - Даг `dds_transform` пересобирает данные прожитых дней при каждом прогоне конвейера.
-      - Задачи `session.rebuild` и `session.replace` собирают день в доноре и заменяют партицию.
+      - "При каждом запуске `dds_transform` выбирает дни от первого пропущенного в DDS до последнего дня с завершенной генерацией."
+      - "Задача `session.rebuild` рассчитывает данные в промежуточной таблице (доноре). `session.replace` заменяет ими дневные партиции основной таблицы."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/session.md#user-content-движок-и-наполнение
@@ -270,22 +269,22 @@ nodes:
     layer: dds
     order: 2
     streams: [orders]
-    what: Заказ в текущем состоянии на языке бизнеса. Артикулы, количества и цены позиций хранятся в согласованных массивах.
-    read: 'Читайте `dds.order_v`: запрос представления возвращает данные без таблиц и донора партиций.'
+    what: "Последнее известное состояние заказа, подготовленное для анализа. Артикулы, количества и цены товаров хранятся в массивах; элементы с одинаковым индексом относятся к одной позиции заказа."
+    read: "Читайте `dds.order_v`, чтобы получить готовые заказы из основной таблицы."
     parts:
       - '`dds.order_rep` — реплицируемая таблица заказов на шарде.'
-      - '`dds.order_dist` — распределенная поверхность загрузки и диагностики.'
-      - '`dds.order_stage_rep` — донор дневных партиций на шарде.'
-      - '`dds.order_stage_dist` — распределенная поверхность донора.'
-      - '`dds.order_v` — публичное представление.'
+      - '`dds.order_dist` — распределенная таблица загрузки и диагностики.'
+      - '`dds.order_stage_rep` — промежуточная таблица для пересчета данных по дням на шарде.'
+      - '`dds.order_stage_dist` — распределенная таблица для записи и чтения промежуточных данных.'
+      - '`dds.order_v` — представление для чтения готовых данных.'
     keys:
       - '`order_id` — тот же заказ, что в ODS, событии покупки и витрине сверки.'
       - '`user_id` — пользователь магазина, который входит в карту идентичностей.'
       - '`item_sku` — тот же артикул, что `sku` в `dic.products`.'
       - '`order_date` — день, который в витринах называется `report_date` или `order_day`.'
     fill:
-      - Даг `dds_transform` пересобирает изменяемое окно при каждом прогоне конвейера.
-      - Задачи `order.rebuild` и `order.replace` собирают дни в доноре и заменяют партиции.
+      - "При каждом запуске `dds_transform` пересчитывает дни заказов из последнего слепка и заполняет пропуски в DDS."
+      - "Задача `order.rebuild` рассчитывает данные в промежуточной таблице (доноре). `order.replace` заменяет ими дневные партиции основной таблицы."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/order.md#user-content-движок-и-наполнение
@@ -299,18 +298,18 @@ nodes:
     layer: dds
     order: 3
     streams: [events, orders]
-    what: Известные пары куки трекера и пользователя магазина. Связь появляется после сопоставленной покупки.
-    read: 'Читайте `dds.identity_map_v`: запрос представления с `FINAL` возвращает актуальные строки полного пересчета.'
+    what: "Связи между посетителем сайта и пользователем магазина. Они появляются, когда событие покупки сопоставлено с заказом по его номеру."
+    read: "Читайте `dds.identity_map_v`: представление с `FINAL` возвращает последнюю версию каждой пары посетителя и пользователя."
     parts:
       - '`dds.identity_map_rep` — реплицируемая таблица версий пар на шарде.'
-      - '`dds.identity_map_dist` — распределенная поверхность записи.'
-      - '`dds.identity_map_v` — точное публичное представление с `FINAL`.'
+      - '`dds.identity_map_dist` — распределенная таблица записи.'
+      - '`dds.identity_map_v` — представление последних версий строк с `FINAL`.'
     keys:
-      - '`client_id` — кука из события и сессии DDS.'
-      - '`user_id` — пользователь магазина из заказа DDS.'
+      - "`client_id` — идентификатор посетителя из cookie браузера, как в событии и сессии DDS."
+      - "`user_id` — пользователь магазина из заказа DDS."
     fill:
-      - Задача `identity_map` дага `dds_transform` пересчитывает все известные пары после обновления заказов.
-      - Новая версия полного набора пишется при каждом прогоне; `FINAL` скрывает физические повторы.
+      - "Задача `identity_map` дага `dds_transform` пересчитывает все известные пары после обновления заказов."
+      - "При каждом запуске записывается новая версия набора связей."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dds/identity.md#user-content-сборка
@@ -324,17 +323,16 @@ nodes:
     layer: dm
     order: 0
     streams: [events]
-    what: Дневные счетчики посетителей и известных пользователей после склейки идентичностей.
-    read: 'Читайте `dm.daily_traffic_v`: запрос представления с `FINAL` возвращает актуальные строки полного пересчета.'
+    what: "Число посетителей и известных пользователей за каждый день. Известными считаются пользователи магазина, связанные с посетителями сайта через карту идентичностей."
+    read: "Читайте `dm.daily_traffic_v`: представление с `FINAL` возвращает последний результат расчета за каждый день."
     parts:
       - '`dm.daily_traffic_rep` — реплицируемая таблица версий счетчиков.'
-      - '`dm.daily_traffic_dist` — распределенная поверхность записи.'
-      - '`dm.daily_traffic_v` — точное публичное представление с `FINAL`.'
+      - '`dm.daily_traffic_dist` — распределенная таблица записи.'
+      - '`dm.daily_traffic_v` — представление последних версий строк с `FINAL`.'
     keys:
       - '`report_date` — тот же день, что `session_date` в сессии DDS.'
     fill:
-      - Задача `daily_traffic` дага `dm_transform` при каждом прогоне пересчитывает всю историю и записывает новую версию.
-      - '`FINAL` оставляет текущую строку каждого дня.'
+      - "Задача `daily_traffic` дага `dm_transform` при каждом запуске пересчитывает всю историю и записывает новую версию."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmdaily_traffic_v
@@ -348,20 +346,20 @@ nodes:
     layer: dm
     order: 1
     streams: [orders]
-    what: Дневная выручка, число заказов и единиц товара по категориям.
-    read: 'Читайте `dm.revenue_daily_v`: это публичное представление готовой дневной витрины.'
+    what: "Выручка, число заказов и единиц товара за день по категориям. В расчет входят оплаченные заказы."
+    read: "Читайте `dm.revenue_daily_v`, чтобы получить готовые показатели по дням и категориям товаров."
     parts:
       - '`dm.revenue_daily_rep` — реплицируемая таблица витрины на шарде.'
-      - '`dm.revenue_daily_dist` — распределенная поверхность загрузки.'
-      - '`dm.revenue_daily_stage_rep` — донор дневных партиций на шарде.'
-      - '`dm.revenue_daily_stage_dist` — распределенная поверхность донора.'
-      - '`dm.revenue_daily_v` — публичное представление.'
+      - '`dm.revenue_daily_dist` — распределенная таблица загрузки.'
+      - '`dm.revenue_daily_stage_rep` — промежуточная таблица для пересчета данных по дням на шарде.'
+      - '`dm.revenue_daily_stage_dist` — распределенная таблица для записи и чтения промежуточных данных.'
+      - '`dm.revenue_daily_v` — представление для чтения готовых данных.'
     keys:
       - '`report_date` — тот же день, что `order_date` в заказе DDS.'
       - '`product_category` — категория, найденная по `item_sku` заказа и ключу `sku` словаря.'
     fill:
-      - Даг `dm_transform` пересобирает изменяемое окно заказов при каждом прогоне конвейера.
-      - Задачи `revenue_daily.rebuild` и `revenue_daily.replace` собирают дни в доноре и заменяют партиции.
+      - "При каждом запуске `dm_transform` пересчитывает дни заказов из последнего слепка и заполняет пропущенные дни витрины."
+      - "Задача `revenue_daily.rebuild` рассчитывает данные в промежуточной таблице (доноре). `revenue_daily.replace` заменяет ими дневные партиции витрины."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmrevenue_daily_v
@@ -375,20 +373,20 @@ nodes:
     layer: dm
     order: 2
     streams: [events, orders]
-    what: Сверка события покупки с заказом магазина. Одна строка показывает совпадение или класс расхождения.
-    read: 'Читайте `dm.purchase_vs_orders_v`: в результате запроса отсутствующей стороне соответствует `NULL`.'
+    what: "Результат сверки покупок из кликстрима с заказами магазина. Для каждого номера заказа указано, совпали ли данные двух источников и какое расхождение найдено."
+    read: "Читайте `dm.purchase_vs_orders_v`: если покупка или заказ отсутствует, поля этой стороны содержат `NULL`."
     parts:
       - '`dm.purchase_vs_orders_rep` — реплицируемая таблица сверки на шарде.'
-      - '`dm.purchase_vs_orders_dist` — распределенная поверхность загрузки.'
-      - '`dm.purchase_vs_orders_stage_rep` — донор дневных партиций на шарде.'
-      - '`dm.purchase_vs_orders_stage_dist` — распределенная поверхность донора.'
-      - '`dm.purchase_vs_orders_v` — публичное представление.'
+      - '`dm.purchase_vs_orders_dist` — распределенная таблица загрузки.'
+      - '`dm.purchase_vs_orders_stage_rep` — промежуточная таблица для пересчета данных по дням на шарде.'
+      - '`dm.purchase_vs_orders_stage_dist` — распределенная таблица для записи и чтения промежуточных данных.'
+      - '`dm.purchase_vs_orders_v` — представление для чтения готовых данных.'
     keys:
-      - '`order_id` — тот же заказ, что `purchase_id[1]` в событии и `order_id` в заказе DDS.'
-      - '`order_day` — общий день события покупки и заказа.'
+      - "`order_id` — тот же заказ, что `purchase_id[1]` в событии и `order_id` в заказе DDS."
+      - "`order_day` — дата заказа; если заказа еще нет, берется дата события покупки."
     fill:
-      - Даг `dm_transform` пересобирает изменяемый хвост обоих источников при каждом прогоне конвейера.
-      - Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` собирают дни в доноре и заменяют партиции.
+      - "При каждом запуске `dm_transform` пересчитывает дни последнего слепка, добавляет новые дни покупок, заполняет пропуски и повторяет сверку дней с покупками без заказа."
+      - "Задача `purchase_vs_orders.rebuild` рассчитывает данные в промежуточной таблице (доноре). `purchase_vs_orders.replace` заменяет ими дневные партиции витрины."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/dm.md#user-content-dmpurchase_vs_orders_v
@@ -402,18 +400,18 @@ nodes:
     layer: dm
     order: 3
     streams: [events, orders]
-    what: Текущее состояние пяти атомарных проверок качества по дням. История запусков остается в Airflow.
-    read: 'Читайте `dm.dq_summary_v`: запрос к публичному представлению возвращает последнюю опубликованную сводку дня.'
+    what: "Последние результаты пяти проверок качества данных за каждый день. Историю запусков можно посмотреть в Airflow."
+    read: "Читайте `dm.dq_summary_v`, чтобы увидеть результат каждой проверки за день."
     parts:
       - '`dm.dq_summary_rep` — реплицируемая таблица опубликованной сводки.'
-      - '`dm.dq_summary_dist` — распределенная поверхность чтения и записи.'
-      - '`dm.dq_summary_stage_rep` — общий донор дневных партиций.'
-      - '`dm.dq_summary_stage_dist` — распределенная поверхность донора.'
-      - '`dm.dq_summary_v` — публичное представление.'
+      - '`dm.dq_summary_dist` — распределенная таблица чтения и записи.'
+      - '`dm.dq_summary_stage_rep` — промежуточная таблица для результатов всех проверок за день.'
+      - '`dm.dq_summary_stage_dist` — распределенная таблица для записи и чтения промежуточных данных.'
+      - '`dm.dq_summary_v` — представление для чтения готовых данных.'
     fill:
-      - Даг `dq_check` при каждом прогоне сначала выполняет все пять проверок, затем заменяет готовые дневные партиции.
+      - Даг `dq_check` сначала рассчитывает результаты всех пяти проверок в промежуточной таблице, затем заменяет ими дневные партиции сводки.
       - '`sessions_vs_reference` — `sql/dq/sessions_vs_reference.sql`.'
-      - '`classes_vs_inventory` — `sql/dq/classes_vs_inventory.sql` и паспорт мира.'
+      - '`classes_vs_inventory` — `sql/dq/classes_vs_inventory.sql` и эталонные числа из паспорта мира `data/world-inventory.json`.'
       - '`revenue_daily_vs_dds` — `sql/dq/revenue_daily_vs_dds.sql`.'
       - '`purchase_vs_orders_vs_dds` — `sql/dq/purchase_vs_orders_vs_dds.sql`.'
       - '`daily_traffic_vs_dds` — `sql/dq/daily_traffic_vs_dds.sql`.'
@@ -430,15 +428,15 @@ nodes:
     layer: dic
     order: 0
     streams: [orders]
-    what: Словарь товаров вне цепочки слоев. По артикулу доступны название, бренд, категория и цена.
-    read: 'Читайте `dic.products`: у словаря одна поверхность без суффикса.'
+    what: "Словарь товаров. По артикулу можно получить название, бренд, категорию и цену. Эти данные доступны для расчетов в разных слоях."
+    read: "Читайте `dic.products`: к словарю обращаются напрямую, суффикса `_v` у него нет."
     parts:
-      - '`dic.products_file` — чтец CSV-каталога из файла репозитория.'
-      - '`dic.products` — словарь в памяти поверх подложки.'
+      - "`dic.products_file` — таблица, которая читает каталог товаров из CSV-файла репозитория."
+      - "`dic.products` — словарь в памяти, загруженный из этой таблицы."
     keys:
       - '`sku` — тот же артикул, что `item_sku` в позиции заказа DDS.'
     fill:
-      - ClickHouse перечитывает подложку каждые 60–90 секунд по настройке `LIFETIME`.
+      - "ClickHouse обновляет словарь из `dic.products_file` каждые 60–90 секунд согласно настройке `LIFETIME`."
     links:
       - label: Справочник
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/docs/architecture/storage.md#user-content-справочники
@@ -452,8 +450,8 @@ edges:
     mechanism: materialized_view
     streams: [events]
     rhythm: непрерывно, по мере прихода сообщений
-    actor: Чтец `stg.hits_raw_kafka` и матвью `stg.hits_raw_mv`.
-    join: 'Соединения нет: сообщение кладется строкой целиком.'
+    actor: "Таблица `stg.hits_raw_kafka` и материализованное представление `stg.hits_raw_mv`."
+    join: "Каждое сообщение Kafka записывается целой строкой, без разбора на поля."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/40-stg-views.sql
@@ -466,8 +464,8 @@ edges:
     mechanism: materialized_view
     streams: [events]
     rhythm: непрерывно, по мере прихода сообщений
-    actor: Матвью `ods.event_mv` разбирает годные строки.
-    join: 'Соединения нет: матвью разбирает строку в колонки.'
+    actor: Материализованное представление `ods.event_mv` разбирает сообщения без ошибок.
+    join: "Материализованное представление разбирает сообщение из STG на колонки с нужными типами данных."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql
@@ -480,8 +478,8 @@ edges:
     mechanism: materialized_view
     streams: [events]
     rhythm: непрерывно, по мере прихода сообщений
-    actor: Матвью `ods.event_errors_mv` отбирает строки, которые не прошли строгий прием.
-    join: 'Соединения нет: негодная строка уходит целиком вместе с классом ошибки.'
+    actor: "Материализованное представление `ods.event_errors_mv` отбирает сообщения с ошибками."
+    join: "Сообщение, которое не удалось разобрать по правилам ODS, сохраняется целиком вместе с классом ошибки."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/30-ods-views.sql
@@ -493,9 +491,9 @@ edges:
     to: stg_orders
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, раз в модельные сутки
+    rhythm: одной выгрузкой, раз в модельные сутки
     actor: Задача `pull_batch` дага `orders_ingest` читает `stg.orders_raw_kafka`.
-    join: 'Соединения нет: сообщение слепка кладется целиком, пачка помечена `_load_id`.'
+    join: "Строки выгрузки сохраняются целиком. Общий `_load_id` позволяет найти все строки одной загрузки."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/stg/orders_raw_load.sql
@@ -507,9 +505,9 @@ edges:
     to: ods_order
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, раз в модельные сутки
-    actor: Задача `parse_batch` дага `orders_ingest` пишет годные версии заказа.
-    join: 'Соединения нет: строка разбирается в колонки, версия задается `snapshot_date`.'
+    rhythm: одной выгрузкой, раз в модельные сутки
+    actor: Задача `parse_batch` дага `orders_ingest` записывает версии заказов без ошибок разбора.
+    join: "Строка разбирается на колонки заказа. Версия определяется датой слепка `snapshot_date`."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ods/order_parse.sql
@@ -521,9 +519,9 @@ edges:
     to: ods_order_errors
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, раз в модельные сутки
-    actor: Задача `parse_batch` дага `orders_ingest` пишет негодные строки той же пачки.
-    join: 'Соединения нет: негодная строка пачки уходит целиком.'
+    rhythm: одной выгрузкой, раз в модельные сутки
+    actor: Задача `parse_batch` дага `orders_ingest` записывает строки с ошибками из загруженной выгрузки.
+    join: "Строка с ошибкой сохраняется целиком вместе с классом ошибки и идентификатором загрузки."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ods/order_parse.sql
@@ -535,9 +533,9 @@ edges:
     to: dds_event
     mechanism: view
     streams: [events]
-    rhythm: без копии, данные читаются на месте
-    actor: Запрос `dds.event_v` читает данные из `ods.event_v` и переименовывает поля на языке бизнеса.
-    join: 'Соединения нет: представление переименовывает колонки той же строки.'
+    rhythm: при запросе к представлению, без копирования данных
+    actor: "Представление `dds.event_v` читает данные из `ods.event_v`."
+    join: "Колонки события переименовываются по правилам DDS. Данные не копируются в отдельную таблицу."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/ddl/50-dds-views.sql
@@ -549,9 +547,9 @@ edges:
     to: dds_session
     mechanism: airflow_dag
     streams: [events]
-    rhythm: пачкой, при каждом прогоне `dds_transform`
+    rhythm: при каждом запуске `dds_transform`
     actor: Задачи `session.rebuild` и `session.replace` дага `dds_transform`.
-    join: 'События одной `client_id` за `event_date` режутся по паузам; `session_id` - `cityHash64(client_id, min(event_time))`.'
+    join: "События одного `client_id` за день `event_date` упорядочиваются по времени. Пауза дольше 30 минут начинает новую сессию. Ее `session_id` рассчитывается как `cityHash64(client_id, min(event_time))`."
     links:
       - label: SQL сборки
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/session_rebuild.sql
@@ -565,9 +563,9 @@ edges:
     to: dds_order
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, при каждом прогоне `dds_transform`
+    rhythm: при каждом запуске `dds_transform`
     actor: Задачи `order.rebuild` и `order.replace` дага `dds_transform`.
-    join: 'Соединения нет: из заказа берутся поля и позиции, `order_date` выводится из `created_at`.'
+    join: "Поля заказа приводятся к типам DDS, а позиции из JSON разбираются в массивы. Дата `order_date` рассчитывается из `created_at`."
     links:
       - label: SQL сборки
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/order_rebuild.sql
@@ -581,9 +579,9 @@ edges:
     to: dds_identity
     mechanism: airflow_dag
     streams: [events]
-    rhythm: пачкой, при каждом прогоне `dds_transform`
+    rhythm: при каждом запуске `dds_transform`
     actor: Задача `identity_map` дага `dds_transform` соединяет покупки с заказами.
-    join: 'Строки покупки и заказа соединяются по `purchase_id[1] = order_id`.'
+    join: "Событие покупки соединяется с заказом по `purchase_id[1] = order_id`. В результате связываются посетитель сайта и пользователь магазина."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/identity_map_rebuild.sql
@@ -595,9 +593,9 @@ edges:
     to: dds_identity
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, при каждом прогоне `dds_transform`
+    rhythm: при каждом запуске `dds_transform`
     actor: Задача `identity_map` дага `dds_transform` соединяет заказы с покупками.
-    join: 'Строки заказа и покупки соединяются по `order_id = purchase_id[1]`; берется `user_id`.'
+    join: "Заказ соединяется с событием покупки по `order_id = purchase_id[1]`. Из заказа берется `user_id` пользователя магазина."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dds/identity_map_rebuild.sql
@@ -609,9 +607,9 @@ edges:
     to: dm_daily_traffic
     mechanism: airflow_dag
     streams: [events]
-    rhythm: пачкой, при каждом прогоне `dm_transform`
+    rhythm: при каждом запуске `dm_transform`
     actor: Задача `daily_traffic` дага `dm_transform` считает посетителей по сессиям.
-    join: 'Соединения нет: сессии группируются по `session_date`, который становится `report_date`.'
+    join: "К сессиям присоединяется карта идентичностей по `client_id`, затем данные группируются по `session_date`. Эта дата записывается в `report_date`."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/daily_traffic_rebuild.sql
@@ -623,9 +621,9 @@ edges:
     to: dm_daily_traffic
     mechanism: airflow_dag
     streams: [events]
-    rhythm: пачкой, при каждом прогоне `dm_transform`
+    rhythm: при каждом запуске `dm_transform`
     actor: Задача `daily_traffic` дага `dm_transform` считает известных пользователей по `client_id`.
-    join: 'GLOBAL LEFT JOIN по `client_id`; сессии без пары остаются в витрине.'
+    join: "`GLOBAL LEFT JOIN` присоединяет карту идентичностей к сессиям по `client_id`. Сессии без известного пользователя тоже участвуют в расчете посетителей."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/daily_traffic_rebuild.sql
@@ -637,9 +635,9 @@ edges:
     to: dm_revenue
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, при каждом прогоне `dm_transform`
+    rhythm: при каждом запуске `dm_transform`
     actor: Задачи `revenue_daily.rebuild` и `revenue_daily.replace` дага `dm_transform`.
-    join: 'Соединения таблиц нет: ARRAY JOIN раскрывает `item_sku`, `item_quantity`, `item_price`; `order_date` становится `report_date`.'
+    join: "`ARRAY JOIN` разворачивает массивы `item_sku`, `item_quantity`, `item_price` в строки позиций заказа. Выручка считается по оплаченным заказам; `order_date` записывается в `report_date`."
     links:
       - label: SQL сборки
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/revenue_daily_rebuild.sql
@@ -653,9 +651,9 @@ edges:
     to: dm_revenue
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, при каждом прогоне `dm_transform`
-    actor: Даг `dm_transform` получает категорию через `dictGet` по `item_sku`; ключ словаря — `sku`.
-    join: 'Категория читается через `dictGet` по `item_sku`; ключ справочника - `sku`.'
+    rhythm: при каждом запуске `dm_transform`
+    actor: "Задача `revenue_daily.rebuild` дага `dm_transform`."
+    join: "Функция `dictGet` получает категорию товара по артикулу `item_sku` из заказа. В словаре этому артикулу соответствует ключ `sku`."
     links:
       - label: SQL
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/revenue_daily_rebuild.sql
@@ -667,9 +665,9 @@ edges:
     to: dm_purchase
     mechanism: airflow_dag
     streams: [events]
-    rhythm: пачкой, при каждом прогоне `dm_transform`
+    rhythm: при каждом запуске `dm_transform`
     actor: Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` дага `dm_transform` читают покупки.
-    join: 'Покупки группируются по `purchase_id[1]` как `purchase_order_id`; `event_date` становится `purchase_day`, затем GLOBAL FULL OUTER JOIN `purchase_order_id = backend_order_id`.'
+    join: "События покупки группируются по номеру `purchase_id[1]`, который получает имя `purchase_order_id`. Дата `event_date` записывается в `purchase_day`. Затем `GLOBAL FULL OUTER JOIN` сопоставляет покупки с заказами по `purchase_order_id = backend_order_id`."
     links:
       - label: SQL сборки
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/purchase_vs_orders_rebuild.sql
@@ -683,9 +681,9 @@ edges:
     to: dm_purchase
     mechanism: airflow_dag
     streams: [orders]
-    rhythm: пачкой, при каждом прогоне `dm_transform`
+    rhythm: при каждом запуске `dm_transform`
     actor: Задачи `purchase_vs_orders.rebuild` и `purchase_vs_orders.replace` дага `dm_transform` читают заказы.
-    join: 'GLOBAL FULL OUTER JOIN: `purchase_order_id = backend_order_id` (`purchase_id[1]` и `order_id`); отсутствующая сторона получает NULL.'
+    join: "`order_id` заказа получает имя `backend_order_id`, а `purchase_id[1]` покупки — `purchase_order_id`. `GLOBAL FULL OUTER JOIN` соединяет их по `purchase_order_id = backend_order_id`. Покупки без заказа и заказы без покупки сохраняются; поля отсутствующей стороны содержат `NULL`."
     links:
       - label: SQL сборки
         url: https://git.dementev.space/ddmitry/clickstream-data-platform/src/branch/main/sql/dm/purchase_vs_orders_rebuild.sql
