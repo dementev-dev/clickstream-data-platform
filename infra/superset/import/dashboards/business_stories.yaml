@@ -153,7 +153,7 @@ position:
       chartId: 2
       height: 44
       width: 12
-      sliceName: Сверка purchase и заказов
+      sliceName: Сверка событий покупки и заказов
       uuid: 19600000-0000-4000-8000-000000000102
   ROW-traffic:
     id: ROW-traffic

@@ -74,7 +74,11 @@ def _publish_summary(
 ) -> list[str]:
     """Записать дневную сводку и вернуть малый срез готовой диагностики."""
     if not summaries:
-        raise AirflowException(f"{check_name}: область проверки пуста")
+        raise AirflowException(
+            f"{check_name}: запрос не вернул ни одного дня для проверки; "
+            "проверьте наличие данных в источниках сверки. Состав проверок "
+            "описан в docs/architecture/dm.md"
+        )
 
     diagnostics: list[str] = []
     context = get_current_context()
@@ -148,7 +152,10 @@ def build_classes_vs_inventory() -> list[str]:
         for mismatch_class, count in day["orders"].items()
     }
     if not expected:
-        raise AirflowException("classes_vs_inventory: в паспорте нет закрытых дней")
+        raise AirflowException(
+            "classes_vs_inventory: в data/world-inventory.json нет счетчиков "
+            "заказов для закрытых дней; сообщите наставнику"
+        )
 
     query = (SQL_ROOT / "dq" / "classes_vs_inventory.sql").read_text(encoding="utf-8")
     # GROUP BY закономерно не возвращает группу из нуля строк.
@@ -179,9 +186,9 @@ def build_classes_vs_inventory() -> list[str]:
                 failed_rows += 1
                 actual_text = actual_count if actual_count is not None else "нет ключа"
                 details.append(
-                    f"{day} key={mismatch_class}: "
-                    f"эталон={reference_count}, "
-                    f"объект={actual_text}"
+                    f"{day} mismatch_class={mismatch_class}: "
+                    f"заказов в паспорте={reference_count}, "
+                    f"в dm.purchase_vs_orders_v={actual_text}"
                 )
         summaries.append((data_date, reference_rows, actual_rows, failed_rows, details))
     return _publish_summary("classes_vs_inventory", summaries)
@@ -194,7 +201,10 @@ def publication_scope() -> list[dict[str, dict[str, str]]]:
         "SELECT DISTINCT data_date FROM dm.dq_summary_stage_dist ORDER BY data_date"
     )
     if not rows:
-        raise AirflowException("донор dm.dq_summary пуст: публиковать нечего")
+        raise AirflowException(
+            "dm.dq_summary_stage_dist пуста: нет результатов для записи "
+            "в сводку DQ; проверьте журналы задач build_* этого запуска"
+        )
     return [{"params": {"day": data_date.isoformat()}} for (data_date,) in rows]
 
 
@@ -239,10 +249,15 @@ def assert_check(check_name: str, diagnostics: list[str]) -> None:
         logging.error("%s: %s", check_name, detail)
     summary = "; ".join(
         f"{data_date}: эталонных ключей {reference_rows}, "
-        f"фактических {actual_rows}, нарушено {failed_rows}"
+        f"ключей в проверяемом объекте {actual_rows}, "
+        f"отсутствуют или различаются {failed_rows}"
         for data_date, reference_rows, actual_rows, failed_rows in failed_days
     )
-    raise AirflowException(f"{check_name}: {summary}")
+    raise AirflowException(
+        f"{check_name}: {summary}. Примеры расхождений — в журнале этой задачи; "
+        "итоги по дням — в dm.dq_summary_v. Источники каждой сверки описаны "
+        "в docs/architecture/dm.md"
+    )
 
 
 @dag(

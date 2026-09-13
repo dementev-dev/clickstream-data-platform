@@ -45,7 +45,10 @@ def check_mart(
     """Сверить одну домашнюю витрину с независимым ответом из источника."""
     hook = _clickhouse_hook()
     if not _mart_exists(hook, mart):
-        raise AirflowException(f"витрина {mart} не найдена; выполните ТЗ {lab_path}")
+        raise AirflowException(
+            f"витрина {mart} не найдена на узле подключения clickhouse_default; "
+            f"проверьте имя и место создания витрины по заданию {lab_path}"
+        )
 
     try:
         query = (SQL_ROOT / sql_name).read_text(encoding="utf-8")
@@ -72,7 +75,8 @@ def check_mart(
     except Exception as error:
         raise AirflowException(
             f"не удалось проверить витрину {mart}: {error}; "
-            f"сверьте договор колонок и проверку в ТЗ {lab_path}"
+            f"сверьте имена и типы колонок с заданием {lab_path}. "
+            "Подробности ошибки — в журнале этой задачи"
         ) from error
 
     failed_rows = sum(summary[3] for summary in summaries)
@@ -93,7 +97,8 @@ def check_mart(
     compared_sides = diagnostics[0]
     raise AirflowException(
         f"витрина {mart} расходится с источником: {days}. "
-        f"Пример сравнения: {compared_sides}. Сверьтесь с ТЗ {lab_path}"
+        f"Пример сравнения: {compared_sides}. Другие примеры — в журнале этой "
+        f"задачи. Проверьте расчет для указанных ключей по заданию {lab_path}"
     )
 
 

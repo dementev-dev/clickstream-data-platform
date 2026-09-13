@@ -37,7 +37,7 @@ metrics:
   extra: null
   warning_text: null
 - metric_name: known_share
-  verbose_name: Доля известных
+  verbose_name: Доля известных пользователей
   metric_type: null
   expression: SUM(known_users) / nullIf(SUM(visitors), 0)
   description: null
