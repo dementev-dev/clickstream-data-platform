@@ -125,7 +125,7 @@ columns:
   datetime_format: null
   extra: null
 - column_name: units
-  verbose_name: Товары
+  verbose_name: Продано единиц товара
   is_dttm: false
   is_active: true
   type: UINT64

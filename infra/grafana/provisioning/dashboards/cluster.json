@@ -11,7 +11,7 @@
   "panels": [
     {
       "type": "timeseries",
-      "title": "Процессор: сколько ядер занимает нода",
+      "title": "Процессор: сколько ядер использует узел",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -51,7 +51,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Память: сколько нода занимает и сколько ей отведено",
+      "title": "Память: использование и лимит узла",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Диски: сколько нода читает и пишет",
+      "title": "Диски: скорость чтения и записи узла",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -154,7 +154,7 @@
     },
     {
       "type": "table",
-      "title": "Части: сколько их у таблицы и по сколько строк в каждой",
+      "title": "Части таблиц: количество и среднее число строк в части",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -199,7 +199,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Слияния: сколько частей они съедают",
+      "title": "Слияния: число объединенных частей",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -280,11 +280,12 @@
           "min": 0
         },
         "overrides": []
-      }
+      },
+      "description": "Узлы дерева Keeper (znode) — записи со служебными данными координации ClickHouse."
     },
     {
       "type": "table",
-      "title": "Распределённый DDL: что прошло по кластеру и чем кончилось",
+      "title": "Распределенный DDL: результаты команд на узлах кластера",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"

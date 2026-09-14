@@ -24,10 +24,10 @@ compose() {
 next_step() {
     case "$DAG_ID" in
         world_initialize)
-            printf 'посмотрите журнал; повторите make up, а для недействительного мира — make rebuild-storage'
+            printf 'проверьте состояние запуска в Airflow и журнал задачи с ошибкой; после устранения причины повторите make up'
             ;;
-        world_recreate) printf 'устраните причину и повторите make rebuild-storage' ;;
-        *) printf 'проверьте журнал дага и повторите команду' ;;
+        world_recreate) printf 'проверьте состояние запуска в Airflow и журнал задачи с ошибкой; после устранения причины повторите make rebuild-storage' ;;
+        *) printf 'проверьте состояние запуска в Airflow и журнал задачи с ошибкой; после устранения причины повторите команду' ;;
     esac
 }
 
@@ -67,7 +67,7 @@ for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
 done
 jq -e --arg dag_id "$DAG_ID" '.dag_id == $dag_id' \
     >/dev/null 2>&1 <<<"$dag" || \
-    fail "даг ${DAG_ID} не появился за $((ATTEMPTS * PAUSE_SECONDS)) с; $(next_step)"
+    fail "даг ${DAG_ID} не появился в API за $((ATTEMPTS * PAUSE_SECONDS)) с; проверьте ошибки импорта в Airflow и журнал службы airflow-dag-processor"
 
 # GET читает DagModel по идентификатору, а POST запуска принимает только запись
 # с `is_stale = false`. На холодном старте GET уже может видеть даг, пока POST
@@ -105,7 +105,7 @@ for ((attempt = 1; attempt <= TRIGGER_ATTEMPTS; attempt++)); do
     fail "Airflow не запустил даг ${DAG_ID}: HTTP ${http_status}${detail:+: ${detail}}; $(next_step)"
 done
 ((triggered == 1)) || \
-    fail "даг ${DAG_ID} не стал доступен для запуска за $((TRIGGER_ATTEMPTS * PAUSE_SECONDS)) с; $(next_step)"
+    fail "даг ${DAG_ID} не стал доступен для запуска за $((TRIGGER_ATTEMPTS * PAUSE_SECONDS)) с; проверьте ошибки импорта в Airflow и журнал службы airflow-dag-processor"
 run_id="$(jq -r '.dag_run_id // empty' <<<"$response")"
 state="$(jq -r '.state // "queued"' <<<"$response")"
 [[ -n "$run_id" ]] || fail "Airflow не вернул идентификатор запуска ${DAG_ID}"
@@ -121,7 +121,7 @@ for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
     state="$(jq -r '.state // empty' <<<"$response" 2>/dev/null || true)"
     case "$state" in
         success)
-            printf 'ЗЕЛЁНО: даг %s, запуск %s, состояние success.\n' "$DAG_ID" "$run_id"
+            printf 'УСПЕХ: даг %s, запуск %s, состояние success.\n' "$DAG_ID" "$run_id"
             exit 0
             ;;
         failed)

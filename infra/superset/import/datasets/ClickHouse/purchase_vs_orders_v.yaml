@@ -55,7 +55,7 @@ columns:
   datetime_format: null
   extra: null
 - column_name: declared_revenue
-  verbose_name: Выручка purchase
+  verbose_name: Заявленная сумма покупки из события
   is_dttm: false
   is_active: true
   type: NULLABLE(DECIMAL(18, 2))
@@ -120,7 +120,7 @@ columns:
   datetime_format: null
   extra: null
 - column_name: order_id
-  verbose_name: Заказ
+  verbose_name: Номер заказа
   is_dttm: false
   is_active: true
   type: STRING
