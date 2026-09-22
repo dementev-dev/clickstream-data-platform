@@ -98,7 +98,7 @@ DDS складывает свою модель и называет атрибу�
 | 41 | `productID` | `Array(String)` | `object` | `product_id` | id товаров события |
 | 42 | `productName` | `Array(String)` | `object` | `product_name` | названия тех же товаров |
 | 43 | `productCategory` | `Array(String)` | `object` | `product_category` | категории тех же товаров |
-| 44 | `productPrice` | `Array(Int64)` | `int64` | `product_price` | цена за штуку целым числом: деньги генератор считает целыми |
+| 44 | `productPrice` | `Array(Int64)` | `int64` | `product_price` | цена за штуку, округленная до целых рублей |
 | 45 | `productQuantity` | `Array(UInt64)` | `uint64` | `product_quantity` | количество штук каждого товара |
 | 46 | `productEventType` | `Array(String)` | `object` | `product_event_type` | действие с товаром: стенд шлёт add и purchase, полный словарь Метрики (detail, remove, impressions) не берём |
 | 47 | `ecommerce` | `String` | `object` | `ecommerce` | сырой JSON события, как отдаёт Метрика — материал лабы про разбор JSON внутри колонки |
