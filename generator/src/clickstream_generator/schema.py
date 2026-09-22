@@ -420,7 +420,7 @@ COLUMNS: tuple[Column, ...] = (
         numpy_dtype="int64",
         normalized_name="product_price",
         group=ColumnGroup.ECOMMERCE,
-        comment="цена за штуку целым числом: деньги генератор считает целыми",
+        comment="цена за штуку, округленная до целых рублей",
     ),
     Column(
         name="productQuantity",

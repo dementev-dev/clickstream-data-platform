@@ -61,6 +61,11 @@
                 <query>GRANT SELECT ON system.settings</query>
             </grants>
         </analyst_reader>
+        <student_writer>
+            <grants>
+                <query>GRANT SELECT, INSERT, CREATE TABLE, DROP TABLE ON default.*</query>
+            </grants>
+        </student_writer>
         <monitoring_reader>
             <grants>
                 <query>GRANT SELECT ON stg.*</query>
@@ -113,6 +118,14 @@
                 <query>GRANT analyst_reader</query>
             </grants>
         </analyst>
+        <student>
+            <password from_env="CLICKHOUSE_STUDENT_PASSWORD"/>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT analyst_reader</query>
+                <query>GRANT student_writer</query>
+            </grants>
+        </student>
         <grafana>
             <password from_env="CLICKHOUSE_GRAFANA_PASSWORD"/>
             <quota>default</quota>

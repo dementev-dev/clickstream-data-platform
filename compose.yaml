@@ -20,6 +20,7 @@ x-clickhouse-common: &clickhouse-common
     CLICKHOUSE_LIFECYCLE_PASSWORD: ${CLICKHOUSE_LIFECYCLE_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:?Скопируйте .env.example в .env}
     CLICKHOUSE_ANALYST_PASSWORD: ${CLICKHOUSE_ANALYST_PASSWORD:?Скопируйте .env.example в .env}
+    CLICKHOUSE_STUDENT_PASSWORD: ${CLICKHOUSE_STUDENT_PASSWORD:?Добавьте CLICKHOUSE_STUDENT_PASSWORD из .env.example в .env}
     CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?Скопируйте .env.example в .env}
   depends_on:
     clickhouse-keeper:
