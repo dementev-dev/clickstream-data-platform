@@ -6,7 +6,7 @@
 ## Подготовка
 
 - [«Хранилище и его слои»](../handbook/storage-layers.md);
-- [«Потоки Airflow и даги модельного времени»](../handbook/airflow-dags.md).
+- [«Генерация и обработка данных в Airflow»](../handbook/airflow-dags.md).
 
 ## Ошибки загрузки и их источники
 

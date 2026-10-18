@@ -5,7 +5,7 @@
 
 ## Подготовка
 
-- [«Немного Superset»](../handbook/superset.md);
+- [«Отчеты в Superset»](../handbook/superset.md);
 - [задание 3: `dm.session_overview`](1-3-session-overview.md).
 
 ## График отказов по устройствам
@@ -59,7 +59,7 @@ FROM dm.session_overview_v;
 ```
 
 Стендовые объекты не меняйте. Что переживает `make up`, а что стирает
-`make clean`, описано в главе [«Немного Superset»](../handbook/superset.md#стендовые-объекты-и-ваши).
+`make clean`, описано в главе [«Отчеты в Superset»](../handbook/superset.md#готовые-и-собственные-отчеты).
 
 ## Проверка результата
 
